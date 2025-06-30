@@ -43,11 +43,13 @@ install_deckyloader() {
 
     log_info "DeckyLoader not found, installing for user $main_user..."
 
+    # Create symlink if needed
     if [ ! -L "/home/deck" ] && [ ! -e "/home/deck" ] && [ "$user_home" != "/home/deck" ]; then
         log_info "Creating /home/deck symlink to $user_home"
         ln -sf "$user_home" /home/deck
     fi
 
+    # Create homebrew directory with correct ownership
     if [ ! -d "$user_home/homebrew" ]; then
         mkdir -p "$user_home/homebrew"
         chown "$main_user:$main_user" "$user_home/homebrew"
@@ -62,13 +64,17 @@ install_deckyloader() {
         return 1
     fi
 
-    chmod +x "$temp_script"
+    # Modify the installer script to work without sudo
+    # Replace all sudo -u $SUDO_USER with su - $main_user -c
+    sed -i "s/\$SUDO_USER/$main_user/g" "$temp_script"
+    sed -i "s/sudo -u \$main_user/su - $main_user -c/g" "$temp_script"
 
-    log_info "Running DeckyLoader installer..."
-    export HOME="$user_home"
-    export USER="$main_user"
+    # Set SUDO_USER for the script
     export SUDO_USER="$main_user"
 
+    chmod +x "$temp_script"
+
+    log_info "Running modified DeckyLoader installer..."
 
     if bash "$temp_script" 2>&1 | systemd-cat -t kodi-firstboot -p info; then
         log_info "DeckyLoader installer completed"
@@ -78,16 +84,28 @@ install_deckyloader() {
         return 1
     fi
 
+    # Ensure correct ownership
     if [ -d "$user_home/homebrew" ]; then
         log_info "Fixing ownership for homebrew directory..."
         chown -R "$main_user:$main_user" "$user_home/homebrew"
 
-        # Set SELinux context if available
+        # Set SELinux context
         if command -v chcon >/dev/null 2>&1 && [ -d "$user_home/homebrew/services/PluginLoader" ]; then
             log_info "Setting SELinux context..."
             chcon -R -t bin_t "$user_home/homebrew/services/PluginLoader" 2>/dev/null || {
                 log_warning "Failed to set SELinux context, continuing anyway"
             }
+        fi
+
+        # Handle the systemd service
+        if [ -f "/etc/systemd/system/plugin_loader.service" ]; then
+            log_info "Configuring plugin_loader service..."
+            # Don't start it immediately during first boot
+            systemctl daemon-reload
+            systemctl enable plugin_loader.service
+            log_info "plugin_loader service enabled for next boot"
+        else
+            log_warning "plugin_loader.service not found after installation"
         fi
 
         log_info "DeckyLoader installation completed successfully"
@@ -101,8 +119,7 @@ install_deckyloader() {
     rm -f "$temp_script"
 
     # Verify installation
-    sleep 2
-    if [ -d "$user_home/homebrew/plugins" ]; then
+    if [ -d "$user_home/homebrew/plugins" ] && [ -f "$user_home/homebrew/services/PluginLoader" ]; then
         log_info "DeckyLoader installation verified"
         return 0
     else
