@@ -180,6 +180,8 @@ main() {
             touch "$FIRSTBOOT_MARKER"
             chown kodi:kodi "$FIRSTBOOT_MARKER"
 
+            systemctl restart plugin_loader.service 2>/dev/null || true
+
             log_info "Setup completed successfully"
         else
             log_error "Plugin installation failed"
