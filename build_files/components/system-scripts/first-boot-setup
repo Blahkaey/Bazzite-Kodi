@@ -9,12 +9,12 @@ log_info() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] KODI-FIRSTBOOT: $@" | systemd-cat -t kodi-firstboot -p info
 }
 
-log_warning() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] KODI-FIRSTBOOT WARNING: $@" | systemd-cat -t kodi-firstboot -p warning
-}
-
 log_error() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] KODI-FIRSTBOOT ERROR: $@" | systemd-cat -t kodi-firstboot -p err
+}
+
+log_warning() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] KODI-FIRSTBOOT WARNING: $@" | systemd-cat -t kodi-firstboot -p warning
 }
 
 get_latest_version() {
@@ -36,7 +36,6 @@ install_deckyloader() {
     local main_user="$1"
     local user_home=$(getent passwd "$main_user" | cut -d: -f6)
 
-    # Check if DeckyLoader is already installed
     if [ -d "$user_home/homebrew/plugins" ]; then
         log_info "DeckyLoader already installed for user $main_user"
         return 0
@@ -44,13 +43,16 @@ install_deckyloader() {
 
     log_info "DeckyLoader not found, installing for user $main_user..."
 
-    # Step 1: Root operations - create symlink if needed
     if [ ! -L "/home/deck" ] && [ ! -e "/home/deck" ] && [ "$user_home" != "/home/deck" ]; then
         log_info "Creating /home/deck symlink to $user_home"
         ln -sf "$user_home" /home/deck
     fi
 
-    # Step 2: Download and modify the installer script
+    if [ ! -d "$user_home/homebrew" ]; then
+        mkdir -p "$user_home/homebrew"
+        chown "$main_user:$main_user" "$user_home/homebrew"
+    fi
+
     local temp_script=$(mktemp /tmp/decky-installer-XXXXXX.sh)
     log_info "Downloading DeckyLoader installer..."
 
@@ -60,19 +62,15 @@ install_deckyloader() {
         return 1
     fi
 
-    # Remove all sudo calls from the script
-    log_info "Modifying installer script to remove sudo requirements..."
-    sed -i 's|sudo -A |HOME='"$user_home"' |g' "$temp_script"
-    sed -i 's|sudo |HOME='"$user_home"' |g' "$temp_script"
-
-    # Make script executable
     chmod +x "$temp_script"
 
-    # Step 3: Run installer as user with proper HOME environment
-    log_info "Running DeckyLoader installer as user $main_user..."
+    log_info "Running DeckyLoader installer..."
     export HOME="$user_home"
+    export USER="$main_user"
+    export SUDO_USER="$main_user"
 
-    if runuser -u "$main_user" -- env HOME="$user_home" bash "$temp_script" 2>&1 | systemd-cat -t kodi-firstboot -p info; then
+
+    if bash "$temp_script" 2>&1 | systemd-cat -t kodi-firstboot -p info; then
         log_info "DeckyLoader installer completed"
     else
         log_error "DeckyLoader installer failed"
@@ -80,13 +78,12 @@ install_deckyloader() {
         return 1
     fi
 
-    # Step 4: Post-install root operations
     if [ -d "$user_home/homebrew" ]; then
-        log_info "Setting ownership for homebrew directory..."
+        log_info "Fixing ownership for homebrew directory..."
         chown -R "$main_user:$main_user" "$user_home/homebrew"
 
         # Set SELinux context if available
-        if command -v chcon >/dev/null 2>&1; then
+        if command -v chcon >/dev/null 2>&1 && [ -d "$user_home/homebrew/services/PluginLoader" ]; then
             log_info "Setting SELinux context..."
             chcon -R -t bin_t "$user_home/homebrew/services/PluginLoader" 2>/dev/null || {
                 log_warning "Failed to set SELinux context, continuing anyway"
@@ -142,7 +139,8 @@ install_deckyloader_plugin() {
         return 1
     fi
 
-    mkdir -p "$plugin_dir"
+    # Create plugin directory if it doesn't exist
+    mkdir -p "$(dirname "$plugin_dir")"
 
     local temp_dir=$(mktemp -d)
     cd "$temp_dir"
@@ -158,16 +156,21 @@ install_deckyloader_plugin() {
             log_info "KodiLauncher plugin extracted successfully"
 
             echo "$latest_version" > "$VERSION_FILE"
+            chown kodi:kodi "$VERSION_FILE"
 
-            chown -R "$main_user:$main_user" "$user_home/homebrew"
+            chown -R "$main_user:$main_user" "$plugin_dir"
 
             log_info "DeckyLoader plugin installation completed (version: $latest_version)"
         else
             log_error "Failed to extract KodiLauncher.zip"
+            cd /
+            rm -rf "$temp_dir"
             return 1
         fi
     else
         log_error "Failed to download KodiLauncher.zip"
+        cd /
+        rm -rf "$temp_dir"
         return 1
     fi
 
@@ -200,7 +203,7 @@ main() {
     if [ "$needs_update" = true ]; then
         if install_deckyloader_plugin; then
             touch "$FIRSTBOOT_MARKER"
-            chown kodi:kodi "$FIRSTBOOT_MARKER"
+            chown kodi:kodi "$FIRSTBOOT_MARKER" 2>/dev/null || true
 
             log_info "Setup completed successfully"
         else
