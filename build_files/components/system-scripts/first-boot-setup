@@ -17,6 +17,18 @@ log_warning() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] KODI-FIRSTBOOT WARNING: $@" | systemd-cat -t kodi-firstboot -p warning
 }
 
+check_network() {
+    log_info "Checking network connectivity..."
+
+    if curl -Is https://github.com --connect-timeout 10 --max-time 15 2>/dev/null | head -1 | grep -E "200|301|302" >/dev/null; then
+        log_info "Network connectivity confirmed"
+        return 0
+    else
+        log_error "Cannot reach GitHub - network may be down or GitHub is unreachable"
+        return 1
+    fi
+}
+
 get_latest_version() {
     local api_url="https://api.github.com/repos/Blahkaey/KodiLauncher/releases/latest"
     local version=$(curl -s "$api_url" | grep '"tag_name"' | cut -d'"' -f4)
@@ -29,6 +41,25 @@ get_installed_version() {
     else
         echo "none"
     fi
+}
+
+modify_installer_script() {
+    local script="$1"
+    local main_user="$2"
+
+    log_info "Modifying decky installer script for root execution..."
+
+    # Remove the UID check at the beginning since we're already root
+    sed -i '/\[ "$UID" -eq 0 \] || exec sudo "$0" "$@"/d' "$script"
+
+    # Replace SUDO_USER variable with actual username
+    sed -i "s/\$SUDO_USER/$main_user/g" "$script"
+
+    # Since we're running as root, remove the "sudo -u username" prefix
+    # The script only uses this for mkdir and touch commands
+    sed -i "s/sudo -u $main_user //g" "$script"
+
+    log_info "Script modification complete"
 }
 
 # Install DeckyLoader if not present
@@ -64,12 +95,9 @@ install_deckyloader() {
         return 1
     fi
 
-    # Modify the installer script to work without sudo
-    # Replace all sudo -u $SUDO_USER with su - $main_user -c
-    sed -i "s/\$SUDO_USER/$main_user/g" "$temp_script"
-    sed -i "s/sudo -u \$main_user/su - $main_user -c/g" "$temp_script"
+    # Modify the installer script to work when run as root
+    modify_installer_script "$temp_script" "$main_user"
 
-    # Set SUDO_USER for the script
     export SUDO_USER="$main_user"
 
     chmod +x "$temp_script"
@@ -198,6 +226,13 @@ install_deckyloader_plugin() {
 }
 
 main() {
+    # Check network connectivity first
+    if ! check_network; then
+        log_error "No network connectivity available. First boot setup requires internet access."
+        log_error "Please ensure the system is connected to the internet and reboot."
+        exit 1
+    fi
+
     local needs_update=false
 
     # Check if first boot
