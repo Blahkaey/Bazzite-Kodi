@@ -52,11 +52,15 @@ install_deckyloader() {
 
     log_info "Downloading and running DeckyLoader installer..."
 
-    local temp_installer=$(mktemp)
+    local temp_installer="/tmp/decky_installer_$$.sh"
+
     if curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh -o "$temp_installer" 2>&1 | systemd-cat -t kodi-firstboot -p info; then
 
         # Remove sudo commands from the script since we're root
         sed -i 's/sudo //g' "$temp_installer"
+
+        chmod 755 "$temp_installer"
+        chown "$main_user:$main_user" "$temp_installer"
 
         if su - "$main_user" -c "bash $temp_installer" 2>&1 | systemd-cat -t kodi-firstboot -p info; then
 
@@ -118,8 +122,6 @@ install_deckyloader_plugin() {
         log_error "Failed to ensure DeckyLoader is installed, cannot proceed with plugin installation"
         return 1
     fi
-
-    mkdir -p "$plugin_dir"
 
     local temp_dir=$(mktemp -d)
     cd "$temp_dir"
