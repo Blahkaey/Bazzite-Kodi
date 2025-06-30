@@ -40,7 +40,7 @@ request-gamemode
 ```
 
 ## IMPORTANT
-**This project contains a modified distribution of Kodi™ Media Center. It is NOT endorsed by, affiliated with, or a product of the XBMC Foundation. Kodi® is a registered trademark of the XBMC Foundation.**
+**This project contains a modified distribution of Kodi™ Media Center. It is NOT endorsed by, affiliated with, or a product of the XBMC Foundation.**
 
 **Original Kodi source:** https://github.com/xbmc/xbmc  
 **Modified source:** https://github.com/Blahkaey/xbmc (Omega branch)
@@ -49,6 +49,7 @@ request-gamemode
 ## Modifications to Kodi
 This distribution includes the following modifications to standard Kodi:
 - Built with GBM platform and HDR support (custom CMake flags)
+- Added peripheral.joystick addon
 - Added HDMI content type setting to signal display to disable ALLM
 
 ## Support
