@@ -50,43 +50,40 @@ install_deckyloader() {
         ln -sf "$HOME" /home/deck
     fi
 
+    # Fix ownership of homebrew directory if it exists
+    if [ -d "$user_home/homebrew" ]; then
+        chown -R "$main_user:$main_user" "$user_home/homebrew"
+    fi
+
+    # Download and run the DeckyLoader installer
     log_info "Downloading and running DeckyLoader installer..."
 
-    local temp_installer="/tmp/decky_installer_$$.sh"
+    # Run the installer directly as root with modified environment
+    # This avoids sudo password prompts
+    export USER="$main_user"
+    export LOGNAME="$main_user"
 
-    if curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh -o "$temp_installer" 2>&1 | systemd-cat -t kodi-firstboot -p info; then
+    # Download and execute the installer, removing sudo since we're root
+    if curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh 2>/dev/null | \
+       sed 's/sudo //g' | \
+       bash 2>&1 | systemd-cat -t kodi-firstboot -p info; then
 
-        # Remove sudo commands from the script since we're root
-        sed -i 's/sudo //g' "$temp_installer"
+        # Apply SELinux context
+        if command -v chcon &> /dev/null; then
+            chcon -R -t bin_t "$user_home/homebrew/services/PluginLoader" 2>/dev/null || true
+        fi
 
-        chmod 755 "$temp_installer"
-        chown "$main_user:$main_user" "$temp_installer"
+        # Fix ownership
+        if [ -d "$user_home/homebrew" ]; then
+            chown -R "$main_user:$main_user" "$user_home/homebrew"
+        fi
 
-        if su - "$main_user" -c "bash $temp_installer" 2>&1 | systemd-cat -t kodi-firstboot -p info; then
-
-            # Apply SELinux context
-            if command -v chcon &> /dev/null; then
-                chcon -R -t bin_t "$user_home/homebrew/services/PluginLoader" 2>/dev/null || true
-            fi
-
-            # Fix ownership if needed
-            if [ -d "$user_home/homebrew" ]; then
-                chown -R "$main_user:$main_user" "$user_home/homebrew"
-            fi
-
-            rm -f "$temp_installer"
-
-            # Verify installation
-            if [ -d "$user_home/homebrew/plugins" ]; then
-                log_info "DeckyLoader installation completed successfully"
-                return 0
-            else
-                log_error "DeckyLoader installation verification failed"
-                return 1
-            fi
+        # Verify installation
+        if [ -d "$user_home/homebrew/plugins" ]; then
+            log_info "DeckyLoader installation completed successfully"
+            return 0
         else
-            rm -f "$temp_installer"
-            log_error "DeckyLoader installation failed"
+            log_error "DeckyLoader installation verification failed - plugins directory not found"
             return 1
         fi
     else
