@@ -1,0 +1,175 @@
+#!/bin/bash
+
+set -euo pipefail
+
+FIRSTBOOT_MARKER="/var/lib/kodi/.firstboot-complete"
+VERSION_FILE="/var/lib/kodi/.kodilauncher-version"
+
+log_info() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] KODI-FIRSTBOOT: $@" | systemd-cat -t kodi-firstboot -p info
+}
+
+log_error() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] KODI-FIRSTBOOT ERROR: $@" | systemd-cat -t kodi-firstboot -p err
+}
+
+get_latest_version() {
+    local api_url="https://api.github.com/repos/Blahkaey/KodiLauncher/releases/latest"
+    local version=$(curl -s "$api_url" | grep '"tag_name"' | cut -d'"' -f4)
+    echo "$version"
+}
+
+get_installed_version() {
+    if [ -f "$VERSION_FILE" ]; then
+        cat "$VERSION_FILE"
+    else
+        echo "none"
+    fi
+}
+
+# Install DeckyLoader if not present
+install_deckyloader() {
+    local main_user="$1"
+    local user_home=$(getent passwd "$main_user" | cut -d: -f6)
+
+    # Check if DeckyLoader is already installed (same check as ujust)
+    if [ -d "$user_home/homebrew/plugins" ]; then
+        log_info "DeckyLoader already installed for user $main_user"
+        return 0
+    fi
+
+    log_info "DeckyLoader not found, installing for user $main_user..."
+
+    export SUDO_USER="$main_user"
+    export HOME="$user_home"
+
+    # Create /home/deck symlink if needed
+    if [ ! -L "/home/deck" ] && [ ! -e "/home/deck" ] && [ "$HOME" != "/home/deck" ]; then
+        log_info "Creating /home/deck symlink to fix plugin compatibility"
+        ln -sf "$HOME" /home/deck
+    fi
+
+    log_info "Downloading and running DeckyLoader installer..."
+    if su - "$main_user" -c "curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh | sh" 2>&1 | systemd-cat -t kodi-firstboot -p info; then
+
+        if command -v chcon &> /dev/null; then
+            chcon -R -t bin_t "$user_home/homebrew/services/PluginLoader" 2>/dev/null || true
+        fi
+
+        if [ -d "$user_home/homebrew" ]; then
+            chown -R "$main_user:$main_user" "$user_home/homebrew"
+        fi
+
+        if [ -d "$user_home/homebrew/plugins" ]; then
+            log_info "DeckyLoader installation completed successfully"
+            return 0
+        else
+            log_error "DeckyLoader installation verification failed"
+            return 1
+        fi
+    else
+        log_error "DeckyLoader installation failed"
+        return 1
+    fi
+}
+
+# Install or update DeckyLoader plugin
+install_deckyloader_plugin() {
+    local latest_version=$(get_latest_version)
+
+    if [ -z "$latest_version" ]; then
+        log_error "Could not fetch latest version from GitHub"
+        return 1
+    fi
+
+    log_info "Installing/Updating DeckyLoader KodiLauncher plugin (version: $latest_version)"
+
+    local main_user=$(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1}' | head -1)
+
+    if [ -z "$main_user" ]; then
+        log_error "Could not find main user for DeckyLoader plugin installation"
+        return 1
+    fi
+
+    local user_home=$(getent passwd "$main_user" | cut -d: -f6)
+    local plugin_dir="$user_home/homebrew/plugins/KodiLauncher"
+
+    log_info "Installing plugin for user: $main_user (home: $user_home)"
+
+    if ! install_deckyloader "$main_user"; then
+        log_error "Failed to ensure DeckyLoader is installed, cannot proceed with plugin installation"
+        return 1
+    fi
+
+    mkdir -p "$plugin_dir"
+
+    local temp_dir=$(mktemp -d)
+    cd "$temp_dir"
+
+    if wget -q "https://github.com/Blahkaey/KodiLauncher/releases/latest/download/KodiLauncher.zip" -O KodiLauncher.zip; then
+        if [ -d "$plugin_dir" ]; then
+            log_info "Removing old KodiLauncher plugin version"
+            rm -rf "$plugin_dir"
+        fi
+
+        mkdir -p "$plugin_dir"
+        if unzip -q KodiLauncher.zip -d "$plugin_dir"; then
+            log_info "KodiLauncher plugin extracted successfully"
+
+            echo "$latest_version" > "$VERSION_FILE"
+
+            chown -R "$main_user:$main_user" "$user_home/homebrew"
+
+            log_info "DeckyLoader plugin installation completed (version: $latest_version)"
+        else
+            log_error "Failed to extract KodiLauncher.zip"
+            return 1
+        fi
+    else
+        log_error "Failed to download KodiLauncher.zip"
+        return 1
+    fi
+
+    cd /
+    rm -rf "$temp_dir"
+
+    return 0
+}
+
+main() {
+    local needs_update=false
+
+    # Check if first boot
+    if [ ! -f "$FIRSTBOOT_MARKER" ]; then
+        log_info "First boot detected"
+        needs_update=true
+    else
+        # Not first boot, check version
+        local installed_version=$(get_installed_version)
+        local latest_version=$(get_latest_version)
+
+        if [ -n "$latest_version" ] && [ "$installed_version" != "$latest_version" ]; then
+            log_info "Version mismatch detected (installed: $installed_version, latest: $latest_version)"
+            needs_update=true
+        else
+            log_info "KodiLauncher is up to date (version: $installed_version)"
+        fi
+    fi
+
+    if [ "$needs_update" = true ]; then
+        if install_deckyloader_plugin; then
+            # Create marker file
+            touch "$FIRSTBOOT_MARKER"
+            chown kodi:kodi "$FIRSTBOOT_MARKER"
+
+            log_info "Setup completed successfully"
+        else
+            log_error "Plugin installation failed"
+            exit 1
+        fi
+    else
+        log_info "No updates needed"
+    fi
+}
+
+main

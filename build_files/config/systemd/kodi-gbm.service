@@ -1,0 +1,29 @@
+[Unit]
+Description=Kodi standalone (GBM/HDR)
+After=remote-fs.target systemd-user-sessions.service network-online.target sound.target bluetooth.target polkit.service upower.service
+Wants=network-online.target polkit.service upower.service
+Conflicts=getty@tty1.service sddm.service
+
+[Service]
+User=kodi
+Group=kodi
+PAMName=login
+TTYPath=/dev/tty1
+
+Environment="HOME=/var/lib/kodi"
+
+ExecStart=/usr/bin/kodi-standalone --windowing=gbm
+ExecStop=-/usr/bin/killall --exact kodi
+
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=10
+
+LimitNOFILE=65536
+
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+Alias=display-manager.service
