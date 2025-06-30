@@ -15,6 +15,11 @@ on:
         options:
           - amd64
           - arm64
+      create-release:
+        description: "Create GitHub Release"
+        required: false
+        default: false
+        type: boolean
   pull_request:
     branches:
       - main
@@ -22,6 +27,9 @@ on:
       - './disk_config/disk.toml'
       - './disk_config/iso.toml'
       - './.github/workflows/build-disk.yml'
+  push:
+    tags:
+      - 'v*'  # Automatically create release on version tags
 
 env:
   IMAGE_NAME: ${{ github.event.repository.name }} # output of build.yml, keep in sync
@@ -37,12 +45,8 @@ jobs:
   build:
     name: Build disk images
     runs-on: ${{ inputs.platform == 'amd64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        disk-type: ["qcow2", "anaconda-iso"]
     permissions:
-      contents: read
+      contents: write  # Changed from read to write for release creation
       packages: read
       id-token: write
 
@@ -51,12 +55,9 @@ jobs:
         run: |
           USER_UID=$(id -u)
           USER_GID=$(id -g)
-          # Concatenate the types with a hyphen
-          DISK_TYPE=$(echo "${{ matrix.disk-type }}" | tr ' ' '-')
           # Lowercase the image uri
           echo "IMAGE_REGISTRY=${IMAGE_REGISTRY,,}" >> ${GITHUB_ENV}
           echo "IMAGE_NAME=${IMAGE_NAME,,}" >> ${GITHUB_ENV}
-          echo "DISK_TYPE=${DISK_TYPE}" >> ${GITHUB_ENV}
           echo "USER_UID=${USER_UID}" >> ${GITHUB_ENV}
           echo "USER_GID=${USER_GID}" >> ${GITHUB_ENV}
 
@@ -82,22 +83,87 @@ jobs:
         uses: osbuild/bootc-image-builder-action@main
         with:
           builder-image: ${{ env.BIB_IMAGE }}
-          config-file: ${{ matrix.disk-type == 'anaconda-iso' && './disk_config/iso.toml' || './disk_config/disk.toml' }}
+          config-file: './disk_config/iso.toml'
           image: ${{ env.IMAGE_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.DEFAULT_TAG }}
           chown: ${{ env.USER_UID }}:${{ env.USER_GID }}
-          types: ${{ matrix.disk-type }}
+          types: anaconda-iso
           additional-args: --use-librepo=True
 
-      - name: Upload disk images and Checksum to Job Artifacts
-        if: inputs.upload-to-s3 != true && github.event_name != 'pull_request'
+      - name: Rename ISO for release
+        if: github.event_name != 'pull_request'
+        run: |
+          ISO_FILE=$(find ${{ steps.build.outputs.output-directory }} -name "*.iso" -type f | head -1)
+          if [ -n "$ISO_FILE" ]; then
+            NEW_NAME="${{ env.IMAGE_NAME }}-${{ inputs.platform || 'amd64' }}-installer.iso"
+            mv "$ISO_FILE" "${{ steps.build.outputs.output-directory }}/$NEW_NAME"
+            echo "ISO_FILENAME=$NEW_NAME" >> $GITHUB_ENV
+          fi
+
+      - name: Upload ISO to Job Artifacts
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          path: ${{ steps.build.outputs.output-directory }}
+          name: ${{ env.IMAGE_NAME }}-installer-iso-${{ inputs.platform || 'amd64' }}
+          path: ${{ steps.build.outputs.output-directory }}/*.iso
           if-no-files-found: error
-          retention-days: 0
+          retention-days: 30
           compression-level: 0
           overwrite: true
-      
+
+      - name: Create Release
+        if: (startsWith(github.ref, 'refs/tags/v') || inputs.create-release == true) && github.event_name != 'pull_request'
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: Release ${{ github.ref_name }}
+          body: |
+            ## Bazzite-Kodi Release ${{ github.ref_name }}
+
+            ### Installation
+            1. Download the installer ISO for your platform
+            2. Write it to a USB drive using a tool like Rufus or dd
+            3. Boot from the USB and follow the installation prompts
+
+            ### What's Changed
+            <!-- Add your changelog here -->
+
+            ### Checksums
+            <!-- Checksums will be added automatically -->
+          draft: true  # Create as draft so you can edit before publishing
+          prerelease: false
+
+      - name: Upload ISO to Release
+        if: (startsWith(github.ref, 'refs/tags/v') || inputs.create-release == true) && github.event_name != 'pull_request'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.build.outputs.output-directory }}/${{ env.ISO_FILENAME }}
+          asset_name: ${{ env.ISO_FILENAME }}
+          asset_content_type: application/x-iso9660-image
+
+      - name: Generate and upload checksums
+        if: (startsWith(github.ref, 'refs/tags/v') || inputs.create-release == true) && github.event_name != 'pull_request'
+        run: |
+          cd ${{ steps.build.outputs.output-directory }}
+          sha256sum *.iso > checksums.sha256
+          cat checksums.sha256
+
+      - name: Upload checksums to Release
+        if: (startsWith(github.ref, 'refs/tags/v') || inputs.create-release == true) && github.event_name != 'pull_request'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.build.outputs.output-directory }}/checksums.sha256
+          asset_name: checksums.sha256
+          asset_content_type: text/plain
+
       - name: Upload to S3
         if: inputs.upload-to-s3 == true && github.event_name != 'pull_request'
         shell: bash
