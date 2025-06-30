@@ -40,6 +40,7 @@ install_deckyloader() {
 
     log_info "DeckyLoader not found, installing for user $main_user..."
 
+    # Set environment variables
     export SUDO_USER="$main_user"
     export HOME="$user_home"
 
@@ -50,25 +51,42 @@ install_deckyloader() {
     fi
 
     log_info "Downloading and running DeckyLoader installer..."
-    if su - "$main_user" -c "curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh | sh" 2>&1 | systemd-cat -t kodi-firstboot -p info; then
 
-        if command -v chcon &> /dev/null; then
-            chcon -R -t bin_t "$user_home/homebrew/services/PluginLoader" 2>/dev/null || true
-        fi
+    local temp_installer=$(mktemp)
+    if curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh -o "$temp_installer" 2>&1 | systemd-cat -t kodi-firstboot -p info; then
 
-        if [ -d "$user_home/homebrew" ]; then
-            chown -R "$main_user:$main_user" "$user_home/homebrew"
-        fi
+        # Remove sudo commands from the script since we're root
+        sed -i 's/sudo //g' "$temp_installer"
 
-        if [ -d "$user_home/homebrew/plugins" ]; then
-            log_info "DeckyLoader installation completed successfully"
-            return 0
+        if su - "$main_user" -c "bash $temp_installer" 2>&1 | systemd-cat -t kodi-firstboot -p info; then
+
+            # Apply SELinux context
+            if command -v chcon &> /dev/null; then
+                chcon -R -t bin_t "$user_home/homebrew/services/PluginLoader" 2>/dev/null || true
+            fi
+
+            # Fix ownership if needed
+            if [ -d "$user_home/homebrew" ]; then
+                chown -R "$main_user:$main_user" "$user_home/homebrew"
+            fi
+
+            rm -f "$temp_installer"
+
+            # Verify installation
+            if [ -d "$user_home/homebrew/plugins" ]; then
+                log_info "DeckyLoader installation completed successfully"
+                return 0
+            else
+                log_error "DeckyLoader installation verification failed"
+                return 1
+            fi
         else
-            log_error "DeckyLoader installation verification failed"
+            rm -f "$temp_installer"
+            log_error "DeckyLoader installation failed"
             return 1
         fi
     else
-        log_error "DeckyLoader installation failed"
+        log_error "Failed to download DeckyLoader installer"
         return 1
     fi
 }
