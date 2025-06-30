@@ -22,15 +22,14 @@ sudo bootc switch ghcr.io/blahkaey/bazzite-kodi:latest
 
 **Note: Deckyloader and KodiLauncher are installed on first boot of Bazzite-Kodi, a reboot is required to see the kodi button in the Steam UI**
 
-### Switching Modes
+### Switching To Kodi/GameMode
+
+**From GameMode (Steam):**
+- The main navigation menu contains the kodi launch button
 
 **From Kodi:**
 - Navigate to Favorites → "Switch To GameMode"
 - Add the Favorites menu to any button in the skin for easy access
-
-**From Gaming Mode (Steam):**
-- The main navigation menu contains the kodi launch button
-
 
 **From Command Line:**
 ```bash
