@@ -20,6 +20,8 @@ sudo bootc switch ghcr.io/blahkaey/bazzite-kodi:latest
 
 ## Quick Start
 
+**Note: Deckyloader and KodiLauncher are installed on first boot of Bazzite-Kodi, a reboot is required to see the kodi button in the Steam UI**
+
 ### Switching Modes
 
 **From Kodi:**
