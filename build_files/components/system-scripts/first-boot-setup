@@ -17,6 +17,41 @@ log_warning() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] KODI-FIRSTBOOT WARNING: $@" | systemd-cat -t kodi-firstboot -p warning
 }
 
+is_deckyloader_installed() {
+    local main_user=$(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1}' | head -1)
+    if [ -z "$main_user" ]; then
+        return 1
+    fi
+
+    local user_home=$(getent passwd "$main_user" | cut -d: -f6)
+
+    # Check for key DeckyLoader components
+    if [ -f "${user_home}/homebrew/services/PluginLoader" ] && \
+       [ -f "/etc/systemd/system/plugin_loader.service" ] && \
+       systemctl is-enabled plugin_loader.service &>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+is_kodilauncher_installed() {
+    local main_user=$(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1}' | head -1)
+    if [ -z "$main_user" ]; then
+        return 1
+    fi
+
+    local user_home=$(getent passwd "$main_user" | cut -d: -f6)
+
+    # Check if KodiLauncher plugin directory exists
+    if [ -d "${user_home}/homebrew/plugins/KodiLauncher" ] && \
+       [ -f "$VERSION_FILE" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 check_for_updates() {
     # Check if we need to update KodiLauncher
     if [ ! -f "$VERSION_FILE" ]; then
@@ -26,12 +61,6 @@ check_for_updates() {
 
     local installed_version=$(cat "$VERSION_FILE" 2>/dev/null || echo "none")
     log_info "Installed KodiLauncher version: $installed_version"
-
-    # For first boot, we don't check for updates since we just installed
-    if [ ! -f "$FIRSTBOOT_MARKER" ]; then
-        log_info "First boot - skipping update check"
-        return 1
-    fi
 
     # Only check for updates if network is available
     if curl -Is https://github.com --connect-timeout 5 --max-time 10 2>/dev/null | head -1 | grep -E "200|301|302" >/dev/null; then
@@ -57,30 +86,69 @@ deploy_deckyloader() {
 
     if /usr/bin/deploy-deckyloader; then
         log_info "DeckyLoader deployed successfully"
-        return 0
+
+        # Verify installation actually succeeded
+        if is_deckyloader_installed; then
+            log_info "DeckyLoader installation verified"
+
+            # Also verify KodiLauncher was deployed
+            if is_kodilauncher_installed; then
+                log_info "KodiLauncher installation verified"
+                return 0
+            else
+                log_warning "KodiLauncher not found after deployment"
+                # Don't fail completely - DeckyLoader is installed at least
+                return 0
+            fi
+        else
+            log_error "DeckyLoader deployment verification failed"
+            return 1
+        fi
     else
-        log_error "DeckyLoader deployment failed"
+        log_error "DeckyLoader deployment script failed"
         return 1
     fi
 }
 
 main() {
-    # Check if first boot
-    if [ ! -f "$FIRSTBOOT_MARKER" ]; then
-        log_info "First boot detected - deploying DeckyLoader"
+    local needs_deployment=false
+    local deployment_reason=""
+
+    # Check what needs to be deployed
+    if ! is_deckyloader_installed; then
+        needs_deployment=true
+        deployment_reason="DeckyLoader not found"
+    elif ! is_kodilauncher_installed; then
+        needs_deployment=true
+        deployment_reason="KodiLauncher not found"
+    fi
+
+    if [ "$needs_deployment" = true ]; then
+        log_info "Deployment needed: $deployment_reason"
 
         if deploy_deckyloader; then
-            touch "$FIRSTBOOT_MARKER"
-            chown kodi:kodi "$FIRSTBOOT_MARKER" 2>/dev/null || true
+            # Only create marker after successful deployment
+            if [ ! -f "$FIRSTBOOT_MARKER" ]; then
+                touch "$FIRSTBOOT_MARKER"
+                chown kodi:kodi "$FIRSTBOOT_MARKER" 2>/dev/null || true
+                log_info "Note: A reboot is recommended to ensure all services start properly"
+            fi
 
-            log_info "First boot setup completed successfully"
-            log_info "Note: DeckyLoader service will start after reboot"
+            log_info "Deployment completed successfully"
         else
-            log_error "First boot setup failed"
+            log_error "Deployment failed"
             exit 1
         fi
     else
-        # Not first boot - check for updates if desired
+        log_info "DeckyLoader and KodiLauncher already installed"
+
+        # Mark first boot complete if not already done
+        if [ ! -f "$FIRSTBOOT_MARKER" ]; then
+            touch "$FIRSTBOOT_MARKER"
+            chown kodi:kodi "$FIRSTBOOT_MARKER" 2>/dev/null || true
+        fi
+
+        # Check for updates
         if check_for_updates; then
             log_info "Running KodiLauncher update..."
             /usr/bin/update-kodilauncher || log_error "Update failed"
