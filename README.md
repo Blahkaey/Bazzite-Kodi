@@ -50,7 +50,7 @@ request-gamemode
 ## Modifications to Kodi
 This distribution includes the following modifications to standard Kodi:
 - Built with GBM platform and HDR support (custom CMake flags)
-- Added peripheral.joystick addon
+- Added peripheral.joystick and inputstream.adaptive addons
 - Added HDMI content type setting to signal display to disable ALLM
 
 ## Support
