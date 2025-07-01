@@ -41,6 +41,12 @@ main() {
     user_home=$(getent passwd "$main_user" | cut -d: -f6)
     plugin_dir="$user_home/homebrew/plugins/KodiLauncher"
 
+    # Check if DeckyLoader is installed
+    if [ ! -d "$user_home/homebrew/plugins" ]; then
+        log_error "DeckyLoader not found. Please reboot to complete installation."
+        exit 1
+    fi
+
     installed_version=$(get_installed_version)
     latest_version=$(get_latest_version)
 
@@ -73,6 +79,12 @@ main() {
             log_info "Update successful!"
             echo "$latest_version" > "/var/lib/kodi/.kodilauncher-version"
             rm -rf "$plugin_dir.backup"
+
+            # Also update the staged version for future deployments
+            if [ -d /usr/share/decky-loader-stage ]; then
+                cp KodiLauncher.zip /usr/share/decky-loader-stage/
+                echo "$latest_version" > /usr/share/decky-loader-stage/.kodilauncher.version
+            fi
         else
             log_error "Failed to extract plugin"
             rm -rf "$plugin_dir"
@@ -88,6 +100,12 @@ main() {
     chown -R "$main_user:$main_user" "$user_home/homebrew"
     cd /
     rm -rf "$temp_dir"
+
+    # Restart plugin_loader to load the new version
+    if systemctl is-active --quiet plugin_loader.service; then
+        log_info "Restarting plugin_loader service..."
+        systemctl restart plugin_loader.service
+    fi
 
     log_info "KodiLauncher updated to version $latest_version"
 }

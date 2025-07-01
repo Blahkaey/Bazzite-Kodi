@@ -17,253 +17,76 @@ log_warning() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] KODI-FIRSTBOOT WARNING: $@" | systemd-cat -t kodi-firstboot -p warning
 }
 
-check_network() {
-    log_info "Checking network connectivity..."
+check_for_updates() {
+    # Check if we need to update KodiLauncher
+    if [ ! -f "$VERSION_FILE" ]; then
+        log_info "No version file found, will check for updates later"
+        return 1
+    fi
 
-    if curl -Is https://github.com --connect-timeout 10 --max-time 15 2>/dev/null | head -1 | grep -E "200|301|302" >/dev/null; then
-        log_info "Network connectivity confirmed"
+    local installed_version=$(cat "$VERSION_FILE" 2>/dev/null || echo "none")
+    log_info "Installed KodiLauncher version: $installed_version"
+
+    # For first boot, we don't check for updates since we just installed
+    if [ ! -f "$FIRSTBOOT_MARKER" ]; then
+        log_info "First boot - skipping update check"
+        return 1
+    fi
+
+    # Only check for updates if network is available
+    if curl -Is https://github.com --connect-timeout 5 --max-time 10 2>/dev/null | head -1 | grep -E "200|301|302" >/dev/null; then
+        local api_url="https://api.github.com/repos/Blahkaey/KodiLauncher/releases/latest"
+        local latest_version=$(curl -s "$api_url" | grep '"tag_name"' | cut -d'"' -f4)
+
+        if [ -n "$latest_version" ] && [ "$installed_version" != "$latest_version" ]; then
+            log_info "Update available: $installed_version -> $latest_version"
+            return 0
+        fi
+    else
+        log_info "Network not available, skipping update check"
+    fi
+
+    return 1
+}
+
+deploy_deckyloader() {
+    log_info "Deploying pre-staged DeckyLoader..."
+
+    # Set environment variable so deploy script knows it's first boot
+    export FIRSTBOOT=1
+
+    if /usr/bin/deploy-deckyloader; then
+        log_info "DeckyLoader deployed successfully"
         return 0
     else
-        log_error "Cannot reach GitHub - network may be down or GitHub is unreachable"
+        log_error "DeckyLoader deployment failed"
         return 1
     fi
-}
-
-get_latest_version() {
-    local api_url="https://api.github.com/repos/Blahkaey/KodiLauncher/releases/latest"
-    local version=$(curl -s "$api_url" | grep '"tag_name"' | cut -d'"' -f4)
-    echo "$version"
-}
-
-get_installed_version() {
-    if [ -f "$VERSION_FILE" ]; then
-        cat "$VERSION_FILE"
-    else
-        echo "none"
-    fi
-}
-
-modify_installer_script() {
-    local script="$1"
-    local main_user="$2"
-
-    log_info "Modifying decky installer script for root execution..."
-
-    # Remove the UID check at the beginning since we're already root
-    sed -i '/\[ "$UID" -eq 0 \] || exec sudo "$0" "$@"/d' "$script"
-
-    # Replace SUDO_USER variable with actual username
-    sed -i "s/\$SUDO_USER/$main_user/g" "$script"
-
-    # Since we're running as root, remove the "sudo -u username" prefix
-    # The script only uses this for mkdir and touch commands
-    sed -i "s/sudo -u $main_user //g" "$script"
-
-    log_info "Script modification complete"
-}
-
-# Install DeckyLoader if not present
-install_deckyloader() {
-    local main_user="$1"
-    local user_home=$(getent passwd "$main_user" | cut -d: -f6)
-
-    if [ -d "$user_home/homebrew/plugins" ]; then
-        log_info "DeckyLoader already installed for user $main_user"
-        return 0
-    fi
-
-    log_info "DeckyLoader not found, installing for user $main_user..."
-
-    # Create symlink if needed
-    if [ ! -L "/home/deck" ] && [ ! -e "/home/deck" ] && [ "$user_home" != "/home/deck" ]; then
-        log_info "Creating /home/deck symlink to $user_home"
-        ln -sf "$user_home" /home/deck
-    fi
-
-    # Create homebrew directory with correct ownership
-    if [ ! -d "$user_home/homebrew" ]; then
-        mkdir -p "$user_home/homebrew"
-        chown "$main_user:$main_user" "$user_home/homebrew"
-    fi
-
-    local temp_script=$(mktemp /tmp/decky-installer-XXXXXX.sh)
-    log_info "Downloading DeckyLoader installer..."
-
-    if ! curl -L https://github.com/SteamDeckHomebrew/decky-installer/releases/latest/download/install_release.sh -o "$temp_script" 2>&1 | systemd-cat -t kodi-firstboot -p info; then
-        log_error "Failed to download DeckyLoader installer"
-        rm -f "$temp_script"
-        return 1
-    fi
-
-    # Modify the installer script to work when run as root
-    modify_installer_script "$temp_script" "$main_user"
-
-    export SUDO_USER="$main_user"
-
-    chmod +x "$temp_script"
-
-    log_info "Running modified DeckyLoader installer..."
-
-    if bash "$temp_script" 2>&1 | systemd-cat -t kodi-firstboot -p info; then
-        log_info "DeckyLoader installer completed"
-    else
-        log_error "DeckyLoader installer failed"
-        rm -f "$temp_script"
-        return 1
-    fi
-
-    # Ensure correct ownership
-    if [ -d "$user_home/homebrew" ]; then
-        log_info "Fixing ownership for homebrew directory..."
-        chown -R "$main_user:$main_user" "$user_home/homebrew"
-
-        # Set SELinux context
-        if command -v chcon >/dev/null 2>&1 && [ -d "$user_home/homebrew/services/PluginLoader" ]; then
-            log_info "Setting SELinux context..."
-            chcon -R -t bin_t "$user_home/homebrew/services/PluginLoader" 2>/dev/null || {
-                log_warning "Failed to set SELinux context, continuing anyway"
-            }
-        fi
-
-        # Handle the systemd service
-        if [ -f "/etc/systemd/system/plugin_loader.service" ]; then
-            log_info "Configuring plugin_loader service..."
-            # Don't start it immediately during first boot
-            systemctl daemon-reload
-            systemctl enable plugin_loader.service
-            log_info "plugin_loader service enabled for next boot"
-        else
-            log_warning "plugin_loader.service not found after installation"
-        fi
-
-        log_info "DeckyLoader installation completed successfully"
-    else
-        log_error "DeckyLoader directory not found after installation"
-        rm -f "$temp_script"
-        return 1
-    fi
-
-    # Cleanup
-    rm -f "$temp_script"
-
-    # Verify installation
-    if [ -d "$user_home/homebrew/plugins" ] && [ -f "$user_home/homebrew/services/PluginLoader" ]; then
-        log_info "DeckyLoader installation verified"
-        return 0
-    else
-        log_error "DeckyLoader installation verification failed"
-        return 1
-    fi
-}
-
-# Install or update DeckyLoader plugin
-install_deckyloader_plugin() {
-    local latest_version=$(get_latest_version)
-
-    if [ -z "$latest_version" ]; then
-        log_error "Could not fetch latest version from GitHub"
-        return 1
-    fi
-
-    log_info "Installing/Updating DeckyLoader KodiLauncher plugin (version: $latest_version)"
-
-    local main_user=$(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1}' | head -1)
-
-    if [ -z "$main_user" ]; then
-        log_error "Could not find main user for DeckyLoader plugin installation"
-        return 1
-    fi
-
-    local user_home=$(getent passwd "$main_user" | cut -d: -f6)
-    local plugin_dir="$user_home/homebrew/plugins/KodiLauncher"
-
-    log_info "Installing plugin for user: $main_user (home: $user_home)"
-
-    if ! install_deckyloader "$main_user"; then
-        log_error "Failed to install DeckyLoader, cannot proceed with plugin installation"
-        return 1
-    fi
-
-    # Create plugin directory if it doesn't exist
-    mkdir -p "$(dirname "$plugin_dir")"
-
-    local temp_dir=$(mktemp -d)
-    cd "$temp_dir"
-
-    if wget -q "https://github.com/Blahkaey/KodiLauncher/releases/latest/download/KodiLauncher.zip" -O KodiLauncher.zip; then
-        if [ -d "$plugin_dir" ]; then
-            log_info "Removing old KodiLauncher plugin version"
-            rm -rf "$plugin_dir"
-        fi
-
-        mkdir -p "$plugin_dir"
-        if unzip -q KodiLauncher.zip -d "$plugin_dir"; then
-            log_info "KodiLauncher plugin extracted successfully"
-
-            echo "$latest_version" > "$VERSION_FILE"
-            chown kodi:kodi "$VERSION_FILE"
-
-            chown -R "$main_user:$main_user" "$plugin_dir"
-
-            log_info "DeckyLoader plugin installation completed (version: $latest_version)"
-        else
-            log_error "Failed to extract KodiLauncher.zip"
-            cd /
-            rm -rf "$temp_dir"
-            return 1
-        fi
-    else
-        log_error "Failed to download KodiLauncher.zip"
-        cd /
-        rm -rf "$temp_dir"
-        return 1
-    fi
-
-    cd /
-    rm -rf "$temp_dir"
-
-    return 0
 }
 
 main() {
-    # Check network connectivity first
-    if ! check_network; then
-        log_error "No network connectivity available. First boot setup requires internet access."
-        log_error "Please ensure the system is connected to the internet and reboot."
-        exit 1
-    fi
-
-    local needs_update=false
-
     # Check if first boot
     if [ ! -f "$FIRSTBOOT_MARKER" ]; then
-        log_info "First boot detected"
-        needs_update=true
-    else
-        # Not first boot, check version
-        local installed_version=$(get_installed_version)
-        local latest_version=$(get_latest_version)
+        log_info "First boot detected - deploying DeckyLoader"
 
-        if [ -n "$latest_version" ] && [ "$installed_version" != "$latest_version" ]; then
-            log_info "Version mismatch detected (installed: $installed_version, latest: $latest_version)"
-            needs_update=true
-        else
-            log_info "KodiLauncher is up to date (version: $installed_version)"
-        fi
-    fi
-
-    if [ "$needs_update" = true ]; then
-        if install_deckyloader_plugin; then
+        if deploy_deckyloader; then
             touch "$FIRSTBOOT_MARKER"
             chown kodi:kodi "$FIRSTBOOT_MARKER" 2>/dev/null || true
 
-            log_info "Setup completed successfully"
+            log_info "First boot setup completed successfully"
+            log_info "Note: DeckyLoader service will start after reboot"
         else
-            log_error "Plugin installation failed"
+            log_error "First boot setup failed"
             exit 1
         fi
     else
-        log_info "No updates needed"
+        # Not first boot - check for updates if desired
+        if check_for_updates; then
+            log_info "Running KodiLauncher update..."
+            /usr/bin/update-kodilauncher || log_error "Update failed"
+        else
+            log_info "No updates needed"
+        fi
     fi
 }
 
