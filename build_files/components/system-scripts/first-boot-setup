@@ -116,10 +116,27 @@ setup_kodi_symlink() {
 
     log_info "Setting up Kodi configuration symlink for user $main_user"
 
-    # Check if the source directory exists
+    # Ensure the kodi base directory exists with correct permissions
+    if [ ! -d "/var/lib/kodi" ]; then
+        mkdir -p /var/lib/kodi
+        chown kodi:wheel /var/lib/kodi
+        chmod 0770 /var/lib/kodi
+    fi
+
+    # Create .kodi directory if it doesn't exist
     if [ ! -d "/var/lib/kodi/.kodi" ]; then
-        log_warning "Kodi configuration directory /var/lib/kodi/.kodi does not exist yet"
-        return 0
+        log_info "Creating /var/lib/kodi/.kodi directory"
+        mkdir -p /var/lib/kodi/.kodi
+    fi
+
+    # Set correct ownership and permissions on .kodi directory
+    chown -R kodi:wheel /var/lib/kodi/.kodi
+    chmod 0770 /var/lib/kodi/.kodi
+
+    # Set group write permissions recursively on existing content
+    find /var/lib/kodi/.kodi -type d -exec chmod 0770 {} \;
+    find /var/lib/kodi/.kodi -type f -exec chmod 0660 {} \;
+
     fi
 
     # Check if target already exists
