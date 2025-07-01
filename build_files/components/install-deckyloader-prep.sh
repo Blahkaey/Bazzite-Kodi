@@ -16,7 +16,7 @@ prepare_deckyloader() {
 
     # Download latest DeckyLoader
     log_info "Fetching latest DeckyLoader release info..."
-    RELEASE=$(curl -s 'https://api.github.com/repos/SteamDeckHomebrew/decky-loader/releases' | jq -r "first(.[] | select(.prerelease == false))")
+    RELEASE=$(curl -s 'https://api.github.com/repos/SteamDeckHomebrew/decky-loader/releases' | jq -r '[.[] | select(.prerelease == false)] | first')
     VERSION=$(jq -r '.tag_name' <<< ${RELEASE})
     DOWNLOADURL=$(jq -r '.assets[].browser_download_url | select(endswith("PluginLoader"))' <<< ${RELEASE})
 
