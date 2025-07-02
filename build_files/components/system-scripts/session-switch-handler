@@ -27,72 +27,6 @@ log_error() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $@" >&2
 }
 
-# Audio state management functions
-save_audio_state() {
-    log_info "Saving audio state..."
-
-    # Try wpctl (PipeWire) first
-    if command -v wpctl &>/dev/null; then
-        # Get default sink volume and mute state
-        wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null > /var/run/audio-volume.tmp || true
-        # Also save full audio status for debugging
-        wpctl status 2>/dev/null > /var/run/audio-status.tmp || true
-    # Fall back to pactl (PulseAudio)
-    elif command -v pactl &>/dev/null; then
-        # Get default sink info
-        pactl info | grep "Default Sink" > /var/run/audio-default-sink.tmp 2>/dev/null || true
-        # Get volume and mute state
-        pactl list sinks | grep -A15 "$(cat /var/run/audio-default-sink.tmp | cut -d: -f2 | xargs)" | grep -E "(Volume:|Mute:)" > /var/run/audio-state.tmp 2>/dev/null || true
-    fi
-
-    log_info "Audio state saved"
-}
-
-restore_audio_state() {
-    log_info "Restoring audio state..."
-
-    # Small delay to ensure audio system is ready
-    sleep 0.5
-
-    # Try wpctl (PipeWire) first
-    if command -v wpctl &>/dev/null && [ -f /var/run/audio-volume.tmp ]; then
-        # Extract volume from saved state (format: "Volume: 0.XX [MUTED]" or "Volume: 0.XX")
-        local volume_line=$(cat /var/run/audio-volume.tmp 2>/dev/null)
-        local volume=$(echo "$volume_line" | grep -o '[0-9]\.[0-9]*' | head -1)
-
-        if [ -n "$volume" ]; then
-            log_info "Restoring volume to $volume"
-            wpctl set-volume @DEFAULT_AUDIO_SINK@ "$volume" 2>/dev/null || true
-        fi
-
-        # Always unmute
-        wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 2>/dev/null || {
-            log_warning "Failed to unmute via wpctl"
-        }
-    # Fall back to pactl (PulseAudio)
-    elif command -v pactl &>/dev/null && [ -f /var/run/audio-state.tmp ]; then
-        # Extract volume percentage
-        local volume=$(grep "Volume:" /var/run/audio-state.tmp | head -1 | grep -o '[0-9]*%' | head -1)
-        if [ -n "$volume" ]; then
-            log_info "Restoring volume to $volume"
-            pactl set-sink-volume @DEFAULT_SINK@ "$volume" 2>/dev/null || true
-        fi
-
-        # Always unmute
-        pactl set-sink-mute @DEFAULT_SINK@ 0 2>/dev/null || {
-            log_warning "Failed to unmute via pactl"
-        }
-    else
-        log_warning "No audio state to restore or audio control command not found"
-    fi
-
-    # Clean up temp files
-    rm -f /var/run/audio-*.tmp 2>/dev/null
-
-    log_info "Audio restoration complete"
-}
-
-
 # Initialize runtime files
 mkdir -p /var/run /var/lib
 touch "$TRIGGER_FILE"
@@ -231,9 +165,6 @@ switch_to_kodi() {
         return 0
     fi
 
-    # Save audio state before switching
-    save_audio_state
-
     # Stop SDDM if running
     if systemctl is-active --quiet sddm.service; then
         log_info "Stopping SDDM..."
@@ -259,8 +190,7 @@ switch_to_kodi() {
         # Wait for Kodi to actually start
         if wait_for_process_start "kodi" 20; then
             echo "kodi" > "$STATE_FILE"
-            # Restore audio state after Kodi starts
-            restore_audio_state
+            #wake_display  # Wake again after start
             log_info "Successfully switched to Kodi"
             return 0
         else
@@ -301,9 +231,6 @@ switch_to_gamemode() {
         return 0
     fi
 
-    # Save audio state before switching
-    save_audio_state
-
     # Update SDDM config
     mkdir -p "$(dirname "$SDDM_CONF")"
     {
@@ -328,6 +255,7 @@ switch_to_gamemode() {
     systemctl start plugin_loader.service 2>/dev/null || true
     sleep 0.1
 
+
     # Reset failed state
     systemctl reset-failed sddm.service 2>/dev/null || true
 
@@ -337,8 +265,6 @@ switch_to_gamemode() {
 
         if systemctl is-active --quiet sddm.service; then
             echo "gamemode" > "$STATE_FILE"
-            # Restore audio state after switching
-            restore_audio_state
             log_info "Successfully switched to Gaming mode"
             return 0
         fi
