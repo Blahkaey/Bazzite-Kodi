@@ -140,9 +140,12 @@ wake_display() {
         # Mark that we've done the initial VT switch
         touch "$vt_init_file"
         log_info "Display pipeline initialized via VT switch"
+
+        # Return early - don't do modetest on first transition
+        return
     fi
-    
-    # Use modetest for DPMS control (works after initial VT switch)
+
+    # For subsequent transitions, use modetest for DPMS control
     if command -v modetest &>/dev/null; then
         local connector_id=$(modetest -c 2>/dev/null | grep "connected" | grep -v "disconnected" | head -1 | awk '{print $1}')
         if [ -n "$connector_id" ]; then
