@@ -52,10 +52,6 @@ restore_audio_state() {
             wpctl set-volume @DEFAULT_AUDIO_SINK@ "$volume" 2>/dev/null || true
         fi
 
-        # Always unmute
-        wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 2>/dev/null || {
-            log_warning "Failed to unmute via wpctl"
-        }
     else
         log_warning "No audio state to restore or audio control command not found"
     fi
@@ -257,7 +253,7 @@ switch_to_kodi() {
     if systemctl start kodi-gbm.service; then
         if wait_for_process_start "kodi" 20; then
             echo "kodi" > "$STATE_FILE"
-            wake_display
+            # wake_display
             log_info "Recovery successful - Kodi started"
             return 0
         fi
