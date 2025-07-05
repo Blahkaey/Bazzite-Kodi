@@ -1,5 +1,4 @@
 #!/bin/bash
-# Simplified session switch handler using systemd targets
 
 set -euo pipefail
 
@@ -29,6 +28,8 @@ initialize() {
     # Determine initial state from active targets
     if systemctl is-active --quiet kodi-mode.target; then
         echo "kodi" > "$STATE_FILE"
+    elif systemctl is-active --quiet desktop-mode.target; then
+        echo "desktop" > "$STATE_FILE"
     elif systemctl is-active --quiet gaming-mode.target; then
         echo "gamemode" > "$STATE_FILE"
     else
@@ -98,6 +99,33 @@ switch_to_gamemode() {
     fi
 }
 
+# Switch to desktop mode
+switch_to_desktop() {
+    log_info "Switching to Desktop mode..."
+
+    # Check if already active
+    if systemctl is-active --quiet desktop-mode.target; then
+        log_info "Desktop mode already active"
+        return 0
+    fi
+
+    # Remove gamescope autologin to allow desktop session
+    rm -f /etc/sddm.conf.d/zz-steamos-autologin.conf
+
+    # Use systemd isolation to switch targets
+    if systemctl isolate desktop-mode.target; then
+        update_state "desktop"
+        log_info "Successfully switched to Desktop mode"
+
+        emit_session_change_signal "desktop" "success" 2>/dev/null || true
+        return 0
+    else
+        log_error "Failed to switch to Desktop mode"
+        emit_session_change_signal "desktop" "failed" 2>/dev/null || true
+        return 1
+    fi
+}
+
 # Optional: Emit DBus signals for monitoring
 emit_session_change_signal() {
     local mode="$1"
@@ -111,36 +139,11 @@ emit_session_change_signal() {
     fi
 }
 
-# Health check
-health_check() {
-    local current_state=$(cat "$STATE_FILE" 2>/dev/null || echo "unknown")
-
-    case "$current_state" in
-        kodi)
-            if ! systemctl is-active --quiet kodi-mode.target; then
-                log_error "State mismatch: state file says 'kodi' but target not active"
-                # Attempt recovery
-                systemctl start kodi-mode.target || switch_to_gamemode
-            fi
-            ;;
-        gamemode)
-            if ! systemctl is-active --quiet gaming-mode.target; then
-                log_error "State mismatch: state file says 'gamemode' but target not active"
-                # Attempt recovery
-                systemctl start gaming-mode.target || switch_to_kodi
-            fi
-            ;;
-    esac
-}
-
 # Main loop
 main() {
     initialize
 
     log_info "Entering main loop, watching $TRIGGER_FILE"
-
-    # Perform initial health check
-    health_check
 
     while true; do
         # Wait for trigger file modification
@@ -156,6 +159,9 @@ main() {
                 "gamemode"|"gaming")
                     switch_to_gamemode
                     ;;
+                "desktop")
+                    switch_to_desktop
+                    ;;
                 "health-check")
                     health_check
                     ;;
@@ -166,12 +172,6 @@ main() {
                     log_error "Unknown request: $REQUEST"
                     ;;
             esac
-
-            # Periodic health check every 10 switches
-            ((++switch_count))
-            if ((switch_count % 10 == 0)); then
-                health_check
-            fi
         fi
     done
 }
