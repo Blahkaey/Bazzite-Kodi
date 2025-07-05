@@ -1,9 +1,18 @@
 #!/bin/bash
-# Configure SDDM for desktop mode (no autologin)
+# /usr/bin/configure-sddm-gaming
 
 SDDM_CONF="/etc/sddm.conf.d/zz-steamos-autologin.conf"
 
-# Remove autologin configuration
-rm -f "$SDDM_CONF"
+# If gaming mode is active (or no mode active = default), use gamescope
+if systemctl is-active --quiet gaming-mode.target || \
+   (! systemctl is-active --quiet desktop-mode.target && ! systemctl is-active --quiet kodi-mode.target); then
+    cat > "$SDDM_CONF" <<EOF
+[Autologin]
+Session=gamescope-session.desktop
+EOF
+else
+    # Desktop mode or any other case - no autologin
+    rm -f "$SDDM_CONF" 2>/dev/null || true
+fi
 
 exit 0
