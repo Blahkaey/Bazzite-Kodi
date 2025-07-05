@@ -1,6 +1,5 @@
 [Unit]
-Description=Kodi Media Center Mode
-Documentation=man:systemd.special(7)
+Description=Kodi Mode
 Conflicts=gaming-mode.target
 After=multi-user.target display-ready.service
 Wants=kodi-gbm.service

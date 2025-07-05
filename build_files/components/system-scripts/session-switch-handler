@@ -1,32 +1,16 @@
 #!/bin/bash
-# Simplified session switch handler using systemd targets
 
 set -euo pipefail
 
-# Configuration
 TRIGGER_FILE="/var/run/session-switch-request"
 STATE_FILE="/var/lib/session-state"
 LOG_TAG="session-switch"
 
-# Logging
-log_info() {
-    logger -t "$LOG_TAG" -p user.info "$*"
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] INFO: $*"
-}
-
-log_error() {
-    logger -t "$LOG_TAG" -p user.err "$*"
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2
-}
-
-# Initialize
 initialize() {
-    # Create trigger file
     mkdir -p /var/run
     touch "$TRIGGER_FILE"
     chmod 666 "$TRIGGER_FILE"
 
-    # Determine initial state from active targets
     if systemctl is-active --quiet kodi-mode.target; then
         echo "kodi" > "$STATE_FILE"
     elif systemctl is-active --quiet gaming-mode.target; then
@@ -40,7 +24,6 @@ initialize() {
     log_info "Session switch handler initialized, state: $(cat "$STATE_FILE")"
 }
 
-# Atomic state update
 update_state() {
     local new_state="$1"
     local temp_file="${STATE_FILE}.tmp.$$"
@@ -49,135 +32,75 @@ update_state() {
     mv -f "$temp_file" "$STATE_FILE"
 }
 
-# Switch to Kodi mode
-switch_to_kodi() {
-    log_info "Switching to Kodi mode..."
-
-    # Check if already active
-    if systemctl is-active --quiet kodi-mode.target; then
-        log_info "Kodi mode already active"
+switch_mode() {
+    local mode="$1"    
+    log_info "Switching to ${mode} mode..."
+    
+    if systemctl is-active --quiet "${mode}.target"; then
+        log_info "${mode} mode already active"
         return 0
     fi
 
-    # Use systemd isolation to switch targets
-    if systemctl isolate kodi-mode.target; then
-        update_state "kodi"
-        log_info "Successfully switched to Kodi mode"
-
-        # Emit DBus signal if available
-        emit_session_change_signal "kodi" "success" 2>/dev/null || true
+    if $mode == "desktop"; then
+cat > "/etc/sddm.conf.d/zz-steamos-autologin.conf" <<EOF
+[Autologin]
+Session=plasma-steamos-wayland-oneshot.desktop
+EOF
+    else
+cat > "/etc/sddm.conf.d/zz-steamos-autologin.conf" <<EOF
+[Autologin]
+Session=gamescope-session.desktop
+EOF
+    fi
+    
+    
+    if systemctl isolate "${mode}.target"; then
+        update_state "$mode"
+        log_info "Successfully switched to ${mode} mode"
         return 0
     else
-        log_error "Failed to switch to Kodi mode"
-        emit_session_change_signal "kodi" "failed" 2>/dev/null || true
+        log_error "Failed to switch to ${mode} mode"
         return 1
     fi
 }
 
-# Switch to gaming mode
-switch_to_gamemode() {
-    log_info "Switching to Gaming mode..."
-
-    # Check if already active
-    if systemctl is-active --quiet gaming-mode.target; then
-        log_info "Gaming mode already active"
-        return 0
-    fi
-
-    # Use systemd isolation to switch targets
-    if systemctl isolate gaming-mode.target; then
-        update_state "gamemode"
-        log_info "Successfully switched to Gaming mode"
-
-        emit_session_change_signal "gamemode" "success" 2>/dev/null || true
-        return 0
-    else
-        log_error "Failed to switch to Gaming mode"
-        emit_session_change_signal "gamemode" "failed" 2>/dev/null || true
-        return 1
-    fi
-}
-
-# Optional: Emit DBus signals for monitoring
-emit_session_change_signal() {
-    local mode="$1"
-    local result="$2"
-
-    if command -v dbus-send &>/dev/null; then
-        dbus-send --system --type=signal \
-            /com/bazzite/SessionManager \
-            com.bazzite.SessionManager.SessionChanged \
-            string:"$mode" string:"$result" 2>/dev/null || true
-    fi
-}
-
-# Health check
-health_check() {
-    local current_state=$(cat "$STATE_FILE" 2>/dev/null || echo "unknown")
-
-    case "$current_state" in
-        kodi)
-            if ! systemctl is-active --quiet kodi-mode.target; then
-                log_error "State mismatch: state file says 'kodi' but target not active"
-                # Attempt recovery
-                systemctl start kodi-mode.target || switch_to_gamemode
-            fi
-            ;;
-        gamemode)
-            if ! systemctl is-active --quiet gaming-mode.target; then
-                log_error "State mismatch: state file says 'gamemode' but target not active"
-                # Attempt recovery
-                systemctl start gaming-mode.target || switch_to_kodi
-            fi
-            ;;
-    esac
-}
-
-# Main loop
 main() {
     initialize
 
     log_info "Entering main loop, watching $TRIGGER_FILE"
 
-    # Perform initial health check
-    health_check
-
     while true; do
-        # Wait for trigger file modification
         if inotifywait -e modify,create,close_write "$TRIGGER_FILE" 2>/dev/null; then
-            # Read request
+
             REQUEST=$(cat "$TRIGGER_FILE" 2>/dev/null | tr -d '\n' | tr -d ' ')
-            : > "$TRIGGER_FILE"  # Clear file
+            : > "$TRIGGER_FILE"
 
             case "$REQUEST" in
                 "kodi")
-                    switch_to_kodi
+                    switch_mode "kodi"
                     ;;
-                "gamemode"|"gaming")
-                    switch_to_gamemode
-                    ;;
-                "health-check")
-                    health_check
+                "gamemode")
+                    switch_mode "gamemode"
                     ;;
                 "")
-                    # Empty request, ignore
                     ;;
                 *)
                     log_error "Unknown request: $REQUEST"
                     ;;
             esac
-
-            # Periodic health check every 10 switches
-            ((++switch_count))
-            if ((switch_count % 10 == 0)); then
-                health_check
-            fi
         fi
     done
 }
 
-# Signal handlers for clean shutdown
-trap 'log_info "Received shutdown signal"; exit 0' SIGTERM SIGINT
+log_info() {
+    logger -t "$LOG_TAG" -p user.info "$*"
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] INFO: $*"
+}
+
+log_error() {
+    logger -t "$LOG_TAG" -p user.err "$*"
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2
+}
 
 # Run main loop
 main "$@"

@@ -23,8 +23,8 @@ install_session_targets() {
     log_subsection "Installing session target units"
 
     # Install target units
-    cp /ctx/config/systemd/kodi-mode.target /usr/lib/systemd/system/
-    cp /ctx/config/systemd/gaming-mode.target /usr/lib/systemd/system/
+    cp /ctx/config/systemd/kodi.target /usr/lib/systemd/system/
+    cp /ctx/config/systemd/gamemode.target /usr/lib/systemd/system/
     cp /ctx/config/systemd/display-ready.service /usr/lib/systemd/system/
 
     # Install display preparation script

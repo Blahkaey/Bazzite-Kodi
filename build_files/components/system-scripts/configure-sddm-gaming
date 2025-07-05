@@ -4,7 +4,7 @@
 SDDM_CONF="/etc/sddm.conf.d/zz-steamos-autologin.conf"
 
 mkdir -p "$(dirname "$SDDM_CONF")"
-cat > "$SDDM_CONF" <<EOF
+cat > "/etc/sddm.conf.d/zz-steamos-autologin.conf" <<EOF
 [Autologin]
 Session=gamescope-session.desktop
 EOF
