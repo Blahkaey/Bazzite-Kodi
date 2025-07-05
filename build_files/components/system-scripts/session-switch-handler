@@ -109,9 +109,6 @@ switch_to_desktop() {
         return 0
     fi
 
-    # Remove gamescope autologin to allow desktop session
-    rm -f /etc/sddm.conf.d/zz-steamos-autologin.conf
-
     # Use systemd isolation to switch targets
     if systemctl isolate desktop-mode.target; then
         update_state "desktop"
