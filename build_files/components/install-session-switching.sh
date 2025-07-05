@@ -37,7 +37,7 @@ install_session_targets() {
 
     # Create SDDM override directory and install override
     mkdir -p /usr/lib/systemd/system/sddm.service.d
-    cp /ctx/config/systemd/sddm.service.d/session-modes.conf /usr/lib/systemd/system/sddm.service.d/
+    cp /ctx/config/systemd/sddm.service.d/gaming-mode.conf /usr/lib/systemd/system/sddm.service.d/
 
 
     #systemctl enable kodi-mode.target
