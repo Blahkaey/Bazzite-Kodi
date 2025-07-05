@@ -4,6 +4,7 @@ Conflicts=kodi.target
 After=multi-user.target
 Wants=sddm.service
 Wants=plugin_loader.service
+AllowIsolate=yes
 
 [Install]
 WantedBy=graphical.target

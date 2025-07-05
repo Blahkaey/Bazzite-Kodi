@@ -1,9 +1,0 @@
-[Unit]
-Description=Desktop Mode
-Documentation=man:systemd.special(7)
-Conflicts=gaming-mode.target kodi-mode.target
-After=multi-user.target display-ready.service
-Wants=sddm.service
-
-[Install]
-WantedBy=graphical.target
