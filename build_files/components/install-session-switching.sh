@@ -31,6 +31,8 @@ install_session_targets() {
     cp /ctx/config/systemd/sddm.service.d/gaming-mode.conf /usr/lib/systemd/system/sddm.service.d/
 
     # Set default target to gaming mode
+    systemctl enable kodi.target
+    systemctl enable gamemode.target
     systemctl set-default gamemode.target
 
     log_success "Session targets installed"

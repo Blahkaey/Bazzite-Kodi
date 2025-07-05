@@ -137,8 +137,6 @@ setup_kodi_symlink() {
     find /var/lib/kodi/.kodi -type d -exec chmod 0770 {} \;
     find /var/lib/kodi/.kodi -type f -exec chmod 0660 {} \;
 
-    fi
-
     # Check if target already exists
     if [ -e "${user_home}/.kodi" ]; then
         if [ -L "${user_home}/.kodi" ]; then

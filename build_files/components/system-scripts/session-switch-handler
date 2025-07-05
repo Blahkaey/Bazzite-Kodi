@@ -13,14 +13,14 @@ initialize() {
     touch "$TRIGGER_FILE"
     chmod 666 "$TRIGGER_FILE"
 
-    if systemctl is-active --quiet kodi-mode.target; then
+    if systemctl is-active --quiet kodi.target; then
         echo "kodi" > "$STATE_FILE"
-    elif systemctl is-active --quiet gaming-mode.target; then
+    elif systemctl is-active --quiet gamemode.target; then
         echo "gamemode" > "$STATE_FILE"
     else
         # Default to gaming mode if neither is active
         echo "gamemode" > "$STATE_FILE"
-        systemctl start gaming-mode.target
+        systemctl start gamemode.target
     fi
 
     log_info "Session switch handler initialized, state: $(cat "$STATE_FILE")"
