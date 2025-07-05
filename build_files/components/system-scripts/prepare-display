@@ -1,0 +1,34 @@
+#!/bin/bash
+# Prepare display for session switching
+
+set -euo pipefail
+
+log_info() {
+    echo "[DISPLAY-PREP] $*"
+}
+
+# Check if we need initial VT setup
+VT_INIT_FILE="/var/run/display-vt-initialized"
+
+if [ ! -f "$VT_INIT_FILE" ]; then
+    log_info "Performing initial display setup"
+
+    # Ensure we're on VT1
+    chvt 1 2>/dev/null || true
+    sleep 0.1
+
+    # Mark as initialized
+    touch "$VT_INIT_FILE"
+fi
+
+# Ensure display is awake via DPMS
+if command -v modetest &>/dev/null; then
+    connector_id=$(modetest -c 2>/dev/null | grep "connected" | grep -v "disconnected" | head -1 | awk '{print $1}')
+    if [ -n "$connector_id" ]; then
+        log_info "Waking display (connector $connector_id)"
+        modetest -w "${connector_id}:DPMS:0" 2>/dev/null || true
+    fi
+fi
+
+log_info "Display preparation complete"
+exit 0

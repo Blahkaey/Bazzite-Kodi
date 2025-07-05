@@ -1,0 +1,41 @@
+#!/bin/bash
+# Query current session state
+
+echo "Session Status Report"
+echo "===================="
+echo
+
+# Current state file
+if [ -f /var/lib/session-state ]; then
+    echo "State file: $(cat /var/lib/session-state)"
+else
+    echo "State file: not found"
+fi
+
+# Active targets
+echo
+echo "Active targets:"
+for target in kodi-mode gaming-mode; do
+    if systemctl is-active --quiet $target.target; then
+        echo "  ✓ $target.target is active"
+    else
+        echo "  ✗ $target.target is inactive"
+    fi
+done
+
+# Service status
+echo
+echo "Service status:"
+for service in kodi-gbm sddm plugin_loader session-switch-handler; do
+    status=$(systemctl is-active $service.service 2>/dev/null || echo "not-found")
+    echo "  - $service.service: $status"
+done
+
+# Display status
+echo
+echo "Display status:"
+if [ -f /var/run/display-vt-initialized ]; then
+    echo "  - VT initialized: yes"
+else
+    echo "  - VT initialized: no"
+fi

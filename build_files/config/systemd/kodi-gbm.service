@@ -1,8 +1,21 @@
 [Unit]
 Description=Kodi standalone (GBM/HDR)
-After=remote-fs.target systemd-user-sessions.service network-online.target sound.target bluetooth.target polkit.service upower.service
+Documentation=man:kodi(1)
+
+# Part of kodi-mode target
+PartOf=kodi-mode.target
+After=kodi-mode.target
+
+# Conflicts with gaming mode
+Conflicts=gaming-mode.target
+
+# Requirements
+After=remote-fs.target systemd-user-sessions.service network-online.target sound.target bluetooth.target polkit.service upower.service display-ready.service
 Wants=network-online.target polkit.service upower.service
-Conflicts=getty@tty1.service sddm.service
+Conflicts=getty@tty1.service
+
+# Ensure clean stop when target stops
+StopWhenUnneeded=yes
 
 [Service]
 User=kodi
@@ -12,13 +25,17 @@ TTYPath=/dev/tty1
 
 Environment="HOME=/var/lib/kodi"
 
+# Use systemd's process tracking
+Type=simple
 ExecStart=/usr/bin/kodi-standalone --windowing=gbm
-ExecStop=-/usr/bin/killall --exact kodi
-ExecStopPost=/bin/bash -c 'if [ "$SERVICE_RESULT" = "success" ] && [ "$EXIT_CODE" = "0" ]; then echo "gamemode" > /var/run/session-switch-request; fi'
-
 Restart=on-failure
 RestartSec=5s
-TimeoutStopSec=10
+TimeoutStopSec=10s
+
+# Cleanup is handled by systemd
+KillMode=mixed
+KillSignal=SIGTERM
+FinalKillSignal=SIGKILL
 
 LimitNOFILE=65536
 
@@ -27,4 +44,4 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-Alias=display-manager.service
+WantedBy=kodi-mode.target

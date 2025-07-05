@@ -1,320 +1,183 @@
 #!/bin/bash
-#
-# Session Switch Handler Daemon
-# Watches for session switch requests and handles transitions
-#
+# Simplified session switch handler using systemd targets
 
 set -euo pipefail
 
 # Configuration
 TRIGGER_FILE="/var/run/session-switch-request"
 STATE_FILE="/var/lib/session-state"
-LOCK_FILE="/var/run/session-switch.lock"
-DISPLAY_METHOD_FILE="/var/run/display-wake-method"
-SDDM_CONF="/etc/sddm.conf.d/zz-steamos-autologin.conf"
-LOG_TAG="session-switch-handler"
+LOG_TAG="session-switch"
 
-# Logging functions
+# Logging
 log_info() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] INFO: $@"
-}
-
-log_warning() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $@" >&2
+    logger -t "$LOG_TAG" -p user.info "$*"
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] INFO: $*"
 }
 
 log_error() {
-    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $@" >&2
+    logger -t "$LOG_TAG" -p user.err "$*"
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2
 }
 
-# Initialize runtime files
-mkdir -p /var/run /var/lib
-touch "$TRIGGER_FILE"
-chmod 666 "$TRIGGER_FILE"
-echo -n "" > "$TRIGGER_FILE"
+# Initialize
+initialize() {
+    # Create trigger file
+    mkdir -p /var/run
+    touch "$TRIGGER_FILE"
+    chmod 666 "$TRIGGER_FILE"
 
-# Initialize state file
-if [[ ! -f "$STATE_FILE" ]]; then
-    if systemctl is-active --quiet kodi-gbm.service; then
+    # Determine initial state from active targets
+    if systemctl is-active --quiet kodi-mode.target; then
         echo "kodi" > "$STATE_FILE"
-    elif systemctl is-active --quiet sddm.service; then
+    elif systemctl is-active --quiet gaming-mode.target; then
         echo "gamemode" > "$STATE_FILE"
     else
-        echo "unknown" > "$STATE_FILE"
-    fi
-fi
-chmod 644 "$STATE_FILE"
-
-# Reset display init flag on daemon start
-rm -f /var/run/display-vt-initialized
-
-log_info "Session switch handler started"
-
-# Function: Wait for process to exit with timeout
-wait_for_process_exit() {
-    local process_pattern="$1"
-    local timeout="${2:-30}"  # Default 300 iterations (3 seconds)
-    local count=0
-
-    while pgrep -f "$process_pattern" >/dev/null && [ $count -lt $timeout ]; do
-        sleep 0.01
-        ((count++))
-    done
-
-    # Return success if process is gone
-    ! pgrep -f "$process_pattern" >/dev/null
-}
-
-# Function: Wait for process to start with timeout
-wait_for_process_start() {
-    local process_name="$1"
-    local timeout="${2:-20}"  # Default 200 iterations (2 seconds)
-    local count=0
-
-    while ! pgrep -x "$process_name" >/dev/null && [ $count -lt $timeout ]; do
-        sleep 0.01
-        ((count++))
-    done
-
-    # Return success if process started
-    pgrep -x "$process_name" >/dev/null
-}
-
-# Function: Wakes display
-wake_display() {
-    log_info "Waking display..."
-    
-    # Check if we've done the initial VT switch setup
-    local vt_init_file="/var/run/display-vt-initialized"
-    
-    if [ ! -f "$vt_init_file" ]; then
-        log_info "First transition from gaming - performing VT switch to initialize display pipeline"
-        
-        # Perform VT cycle to reset display state
-        local current_vt=$(fgconsole 2>/dev/null || echo "1")
-        chvt 2 2>/dev/null || true
-        sleep 0.05
-        chvt 1 2>/dev/null || true
-        sleep 0.1
-        
-        # Mark that we've done the initial VT switch
-        touch "$vt_init_file"
-        log_info "Display pipeline initialized via VT switch"
-
-        # Return early - don't do modetest on first transition
-        return
+        # Default to gaming mode if neither is active
+        echo "gamemode" > "$STATE_FILE"
+        systemctl start gaming-mode.target
     fi
 
-    # For subsequent transitions, use modetest for DPMS control
-    if command -v modetest &>/dev/null; then
-        local connector_id=$(modetest -c 2>/dev/null | grep "connected" | grep -v "disconnected" | head -1 | awk '{print $1}')
-        if [ -n "$connector_id" ]; then
-            log_info "Setting DPMS on via modetest (connector $connector_id)"
-            modetest -w "${connector_id}:DPMS:0" 2>/dev/null || {
-                log_warning "modetest DPMS set failed"
-            }
-        else
-            log_warning "No connected display found for modetest"
-        fi
+    log_info "Session switch handler initialized, state: $(cat "$STATE_FILE")"
+}
+
+# Atomic state update
+update_state() {
+    local new_state="$1"
+    local temp_file="${STATE_FILE}.tmp.$$"
+
+    echo "$new_state" > "$temp_file"
+    mv -f "$temp_file" "$STATE_FILE"
+}
+
+# Switch to Kodi mode
+switch_to_kodi() {
+    log_info "Switching to Kodi mode..."
+
+    # Check if already active
+    if systemctl is-active --quiet kodi-mode.target; then
+        log_info "Kodi mode already active"
+        return 0
+    fi
+
+    # Use systemd isolation to switch targets
+    if systemctl isolate kodi-mode.target; then
+        update_state "kodi"
+        log_info "Successfully switched to Kodi mode"
+
+        # Emit DBus signal if available
+        emit_session_change_signal "kodi" "success" 2>/dev/null || true
+        return 0
     else
-        log_warning "modetest not available"
+        log_error "Failed to switch to Kodi mode"
+        emit_session_change_signal "kodi" "failed" 2>/dev/null || true
+        return 1
     fi
-    
-    log_info "Display wake sequence completed"
 }
 
-# Function: Process cleanup
-cleanup_processes() {
-    local target="$1"
+# Switch to gaming mode
+switch_to_gamemode() {
+    log_info "Switching to Gaming mode..."
 
-    case "$target" in
+    # Check if already active
+    if systemctl is-active --quiet gaming-mode.target; then
+        log_info "Gaming mode already active"
+        return 0
+    fi
+
+    # Use systemd isolation to switch targets
+    if systemctl isolate gaming-mode.target; then
+        update_state "gamemode"
+        log_info "Successfully switched to Gaming mode"
+
+        emit_session_change_signal "gamemode" "success" 2>/dev/null || true
+        return 0
+    else
+        log_error "Failed to switch to Gaming mode"
+        emit_session_change_signal "gamemode" "failed" 2>/dev/null || true
+        return 1
+    fi
+}
+
+# Optional: Emit DBus signals for monitoring
+emit_session_change_signal() {
+    local mode="$1"
+    local result="$2"
+
+    if command -v dbus-send &>/dev/null; then
+        dbus-send --system --type=signal \
+            /com/bazzite/SessionManager \
+            com.bazzite.SessionManager.SessionChanged \
+            string:"$mode" string:"$result" 2>/dev/null || true
+    fi
+}
+
+# Health check
+health_check() {
+    local current_state=$(cat "$STATE_FILE" 2>/dev/null || echo "unknown")
+
+    case "$current_state" in
         kodi)
-            # Try graceful termination
-            pkill -TERM -f "kodi" 2>/dev/null || true
-            # Short grace period
-            sleep 0.2
-            # Force kill if still running
-            if pgrep -f "kodi" >/dev/null; then
-                log_info "Force killing Kodi processes"
-                pkill -KILL -f "kodi" 2>/dev/null || true
+            if ! systemctl is-active --quiet kodi-mode.target; then
+                log_error "State mismatch: state file says 'kodi' but target not active"
+                # Attempt recovery
+                systemctl start kodi-mode.target || switch_to_gamemode
             fi
             ;;
-        gaming)
-
-            systemctl stop plugin_loader.service 2>/dev/null || true
-            pkill -KILL -f "gamescope" 2>/dev/null || true
-
+        gamemode)
+            if ! systemctl is-active --quiet gaming-mode.target; then
+                log_error "State mismatch: state file says 'gamemode' but target not active"
+                # Attempt recovery
+                systemctl start gaming-mode.target || switch_to_kodi
+            fi
             ;;
     esac
 }
 
-# Function: Switch to Kodi
-switch_to_kodi() {
-    log_info "Switching to Kodi HDR mode..."
-
-    # Quick check if already running
-    if systemctl is-active --quiet kodi-gbm.service; then
-        log_info "Already in Kodi mode"
-        return 0
-    fi
-
-    # Stop SDDM if running
-    if systemctl is-active --quiet sddm.service; then
-        log_info "Stopping SDDM..."
-        if ! systemctl stop sddm.service; then
-            log_error "Failed to stop SDDM"
-            return 1
-        fi
-
-        # Wait for gamescope to actually exit
-        wait_for_process_exit "gamescope" 30 || {
-            log_warning "Gamescope didn't exit cleanly, continuing anyway"
-        }
-    fi
-
-    # Cleanup gaming processes
-    cleanup_processes "gaming"
-
-    # Wake display before starting
-    wake_display
-
-    # Start Kodi
-    if systemctl start kodi-gbm.service; then
-        # Wait for Kodi to actually start
-        if wait_for_process_start "kodi" 20; then
-            echo "kodi" > "$STATE_FILE"
-            log_info "Successfully switched to Kodi"
-            return 0
-        else
-            log_error "Kodi service started but process not found"
-            systemctl stop kodi-gbm.service 2>/dev/null || true
-        fi
-    fi
-
-    
-    log_error "Failed to start Kodi, attempting recovery"
-
-    # Recovery: Clear any stuck state and try once more
-    systemctl reset-failed kodi-gbm.service 2>/dev/null || true
-    pkill -KILL -f "kodi" 2>/dev/null || true
-    sleep 0.5
-
-    if systemctl start kodi-gbm.service; then
-        if wait_for_process_start "kodi" 20; then
-            echo "kodi" > "$STATE_FILE"
-            # wake_display
-            log_info "Recovery successful - Kodi started"
-            return 0
-        fi
-    fi
-
-    log_error "Failed to start Kodi - recovery unsuccessful"
-    echo "failed" > "$STATE_FILE"
-    return 1
-}
-
-# Function: Switch to gaming mode with retry logic
-switch_to_gamemode() {
-    log_info "Switching to Gaming mode..."
-
-    # Quick check if already running
-    if systemctl is-active --quiet sddm.service; then
-        log_info "Already in Gaming mode"
-        return 0
-    fi
-
-    # Update SDDM config
-    mkdir -p "$(dirname "$SDDM_CONF")"
-    {
-        echo "[Autologin]"
-        echo "Session=gamescope-session.desktop"
-    } > "$SDDM_CONF"
-
-    # Stop Kodi if running
-    if systemctl is-active --quiet kodi-gbm.service; then
-        log_info "Stopping Kodi service..."
-        systemctl stop kodi-gbm.service || true
-
-        # Wait for Kodi to exit
-        wait_for_process_exit "kodi" 20 || {
-            log_warning "Kodi didn't exit cleanly, continuing anyway"
-        }
-    fi
-
-    # Cleanup Kodi processes
-    cleanup_processes "kodi"
-
-    systemctl start plugin_loader.service 2>/dev/null || true
-    sleep 0.1
-
-    # Reset failed state
-    systemctl reset-failed sddm.service 2>/dev/null || true
-
-    if systemctl start sddm.service; then
-        # Give SDDM a moment to initialize
-        sleep 0.5
-
-        if systemctl is-active --quiet sddm.service; then
-            echo "gamemode" > "$STATE_FILE"
-            log_info "Successfully switched to Gaming mode"
-            return 0
-        fi
-    fi
-
-
-    log_error "Failed to start SDDM, attempting recovery"
-
-    # Kill any stuck processes
-    pkill -KILL -f "sddm" 2>/dev/null || true
-    sleep 0.5
-
-    systemctl reset-failed sddm.service 2>/dev/null || true
-
-    if systemctl start sddm.service; then
-        echo "gamemode" > "$STATE_FILE"
-        log_info "Recovery successful - SDDM started"
-        return 0
-    fi
-
-    log_error "Failed to start SDDM - recovery unsuccessful"
-    echo "failed" > "$STATE_FILE"
-    return 1
-}
-
 # Main loop
-log_info "Entering main loop, watching $TRIGGER_FILE"
+main() {
+    initialize
 
-while true; do
-    # Wait for trigger file modification
-    if inotifywait -e modify,create "$TRIGGER_FILE" 2>/dev/null; then
-        # Lock to prevent concurrent switches
-        exec 200>"$LOCK_FILE"
-        if ! flock -n 200; then
-            log_info "Another switch operation in progress, skipping..."
-            continue
+    log_info "Entering main loop, watching $TRIGGER_FILE"
+
+    # Perform initial health check
+    health_check
+
+    while true; do
+        # Wait for trigger file modification
+        if inotifywait -e modify,create,close_write "$TRIGGER_FILE" 2>/dev/null; then
+            # Read request
+            REQUEST=$(cat "$TRIGGER_FILE" 2>/dev/null | tr -d '\n' | tr -d ' ')
+            : > "$TRIGGER_FILE"  # Clear file
+
+            case "$REQUEST" in
+                "kodi")
+                    switch_to_kodi
+                    ;;
+                "gamemode"|"gaming")
+                    switch_to_gamemode
+                    ;;
+                "health-check")
+                    health_check
+                    ;;
+                "")
+                    # Empty request, ignore
+                    ;;
+                *)
+                    log_error "Unknown request: $REQUEST"
+                    ;;
+            esac
+
+            # Periodic health check every 10 switches
+            ((++switch_count))
+            if ((switch_count % 10 == 0)); then
+                health_check
+            fi
         fi
+    done
+}
 
-        # Read and clear the request
-        REQUEST=$(cat "$TRIGGER_FILE" 2>/dev/null | tr -d '\n' | tr -d ' ')
-        echo -n "" > "$TRIGGER_FILE"
+# Signal handlers for clean shutdown
+trap 'log_info "Received shutdown signal"; exit 0' SIGTERM SIGINT
 
-        # Process the request
-        case "$REQUEST" in
-            "kodi")
-                switch_to_kodi
-                ;;
-            "gamemode"|"gaming")
-                switch_to_gamemode
-                ;;
-            "")
-                # Empty request, ignore
-                ;;
-            *)
-                log_error "Unknown request: $REQUEST"
-                ;;
-        esac
-
-        # Release lock
-        flock -u 200
-    fi
-done
+# Run main loop
+main "$@"
