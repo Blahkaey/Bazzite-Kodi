@@ -32,7 +32,7 @@ install_session_targets() {
 
     # Set default target to gaming mode
     systemctl enable kodi.target
-    systemctl senable gamemode.target
+    systemctl enable gamemode.target
     systemctl set-default gamemode.target
 
     log_success "Session targets installed"
