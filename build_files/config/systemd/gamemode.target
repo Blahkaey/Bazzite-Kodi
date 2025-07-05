@@ -1,0 +1,9 @@
+[Unit]
+Description=Gaming Mode
+Conflicts=kodi.target
+After=multi-user.target
+Wants=sddm.service
+Wants=plugin_loader.service
+
+[Install]
+WantedBy=graphical.target
