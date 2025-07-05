@@ -225,7 +225,7 @@ switch_to_kodi() {
     cleanup_processes "gaming"
 
     # Wake display before starting
-    #wake_display
+    wake_display
 
     # Start Kodi
     if systemctl start kodi-gbm.service; then
