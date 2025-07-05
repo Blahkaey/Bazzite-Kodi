@@ -76,8 +76,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=kodi-${{ steps.check-updates.outputs.kodi-commit-short }}
-          cache-to: type=gha,mode=max,scope=kodi-${{ steps.check-updates.outputs.kodi-commit-short }}
           platforms: linux/amd64
 
       - name: Install cosign
