@@ -27,42 +27,6 @@ log_error() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $@" >&2
 }
 
-# Audio state management functions
-save_audio_state() {
-    log_info "Saving audio state..."
-
-    # Get default sink volume and mute state
-    wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null > /var/run/audio-volume.tmp || true
-    # Also save full audio status for debugging
-    wpctl status 2>/dev/null > /var/run/audio-status.tmp || true
-
-    log_info "Audio state saved"
-}
-
-restore_audio_state() {
-    log_info "Restoring audio state..."
-
-    if command -v wpctl &>/dev/null && [ -f /var/run/audio-volume.tmp ]; then
-        # Extract volume from saved state (format: "Volume: 0.XX [MUTED]" or "Volume: 0.XX")
-        local volume_line=$(cat /var/run/audio-volume.tmp 2>/dev/null)
-        local volume=$(echo "$volume_line" | grep -o '[0-9]\.[0-9]*' | head -1)
-
-        if [ -n "$volume" ]; then
-            log_info "Restoring volume to $volume"
-            wpctl set-volume @DEFAULT_AUDIO_SINK@ "$volume" 2>/dev/null || true
-        fi
-
-    else
-        log_warning "No audio state to restore or audio control command not found"
-    fi
-
-    # Clean up temp files
-    rm -f /var/run/audio-*.tmp 2>/dev/null
-
-    log_info "Audio restoration complete"
-}
-
-
 # Initialize runtime files
 mkdir -p /var/run /var/lib
 touch "$TRIGGER_FILE"
@@ -176,25 +140,15 @@ cleanup_processes() {
             fi
             ;;
         gaming)
-            # Terminate Steam and Gamescope
-            #pkill -TERM -f "steam" 2>/dev/null || true
-            #pkill -TERM -f "gamescope" 2>/dev/null || true
-            # Short grace period
-            #sleep 0.2
 
             systemctl stop plugin_loader.service 2>/dev/null || true
+            pkill -KILL -f "gamescope" 2>/dev/null || true
 
-            # Force kill if needed
-            #if pgrep -f "steam|gamescope" >/dev/null; then
-            #    log_info "Force killing gaming processes"
-            #    pkill -KILL -f "steam" 2>/dev/null || true
-                pkill -KILL -f "gamescope" 2>/dev/null || true
-            #fi
             ;;
     esac
 }
 
-# Function: Switch to Kodi with retry logic
+# Function: Switch to Kodi
 switch_to_kodi() {
     log_info "Switching to Kodi HDR mode..."
 
@@ -203,9 +157,6 @@ switch_to_kodi() {
         log_info "Already in Kodi mode"
         return 0
     fi
-
-    # Save audio state before switching
-    save_audio_state
 
     # Stop SDDM if running
     if systemctl is-active --quiet sddm.service; then
@@ -232,8 +183,6 @@ switch_to_kodi() {
         # Wait for Kodi to actually start
         if wait_for_process_start "kodi" 20; then
             echo "kodi" > "$STATE_FILE"
-            # Restore audio state after Kodi starts
-            restore_audio_state
             log_info "Successfully switched to Kodi"
             return 0
         else
@@ -274,9 +223,6 @@ switch_to_gamemode() {
         return 0
     fi
 
-    # Save audio state before switching
-    save_audio_state
-
     # Update SDDM config
     mkdir -p "$(dirname "$SDDM_CONF")"
     {
@@ -310,8 +256,6 @@ switch_to_gamemode() {
 
         if systemctl is-active --quiet sddm.service; then
             echo "gamemode" > "$STATE_FILE"
-            # Restore audio state after switching
-            restore_audio_state
             log_info "Successfully switched to Gaming mode"
             return 0
         fi
