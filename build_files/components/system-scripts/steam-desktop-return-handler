@@ -1,0 +1,26 @@
+#!/bin/bash
+# Monitor for gamescope exit and switch to desktop mode
+
+set -euo pipefail
+
+log_info() {
+    logger -t "steam-desktop-handler" "$*"
+}
+
+while true; do
+    # Wait for gamescope to exit
+    while pgrep -x "gamescope" >/dev/null; do
+        sleep 0.1
+    done
+
+    # If we're still in gaming mode but gamescope died, switch to desktop
+    if systemctl is-active --quiet gaming-mode.target; then
+        log_info "Gamescope exited, switching to desktop mode"
+        echo "desktop" > /var/run/session-switch-request
+
+        # Wait a bit to avoid rapid cycling
+        sleep 1
+    fi
+
+    sleep 1
+done

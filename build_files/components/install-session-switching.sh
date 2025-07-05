@@ -25,7 +25,9 @@ install_session_targets() {
     # Install target units
     cp /ctx/config/systemd/kodi-mode.target /usr/lib/systemd/system/
     cp /ctx/config/systemd/gaming-mode.target /usr/lib/systemd/system/
+    cp /ctx/config/systemd/desktop-mode.target /usr/lib/systemd/system/
     cp /ctx/config/systemd/display-ready.service /usr/lib/systemd/system/
+    cp /ctx/config/systemd/steam-desktop-return-handler.service /usr/lib/systemd/system/
 
     # Install display preparation script
     cp /ctx/components/system-scripts/prepare-display /usr/bin/
@@ -37,12 +39,11 @@ install_session_targets() {
 
     # Create SDDM override directory and install override
     mkdir -p /usr/lib/systemd/system/sddm.service.d
-    cp /ctx/config/systemd/sddm.service.d/gaming-mode.conf /usr/lib/systemd/system/sddm.service.d/
+    cp /ctx/config/systemd/sddm.service.d/session-modes.conf /usr/lib/systemd/system/sddm.service.d/
 
     # Enable targets
-    systemctl enable kodi-mode.target
-    systemctl enable gaming-mode.target
     systemctl enable display-ready.service
+    systemctl enable steam-desktop-return-handler.service
 
     # Set default target to gaming mode
     systemctl set-default gaming-mode.target
@@ -58,11 +59,13 @@ install_session_request_scripts() {
     cp /ctx/components/system-scripts/request-gamemode /usr/bin/
     cp /ctx/components/system-scripts/kodi-request-gamemode /usr/bin/
     cp /ctx/components/system-scripts/session-status /usr/bin/
+    cp /ctx/components/system-scripts/steam-desktop-return-handler /usr/bin/
 
     chmod +x /usr/bin/request-kodi
     chmod +x /usr/bin/request-gamemode
     chmod +x /usr/bin/kodi-request-gamemode
     chmod +x /usr/bin/session-status
+    chmod +x /usr/bin/steam-desktop-return-handler
 
     log_success "Session request scripts installed"
 }

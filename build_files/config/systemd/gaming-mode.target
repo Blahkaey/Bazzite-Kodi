@@ -1,10 +1,12 @@
 [Unit]
-Description=Gaming Mode (Steam/Gamescope)
+Description=Gaming Mode (Steam Big Picture)
 Documentation=man:systemd.special(7)
-Conflicts=kodi-mode.target
+Conflicts=kodi-mode.target desktop-mode.target
 After=multi-user.target display-ready.service
 Wants=sddm.service
 Wants=plugin_loader.service
+# Add a service to monitor for desktop requests
+Wants=steam-desktop-return-handler.service
 
 [Install]
 WantedBy=graphical.target
