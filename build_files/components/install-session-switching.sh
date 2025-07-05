@@ -25,24 +25,10 @@ install_session_targets() {
     # Install target units
     cp /ctx/config/systemd/kodi.target /usr/lib/systemd/system/
     cp /ctx/config/systemd/gamemode.target /usr/lib/systemd/system/
-    cp /ctx/config/systemd/display-ready.service /usr/lib/systemd/system/
-
-    # Install display preparation script
-    cp /ctx/components/system-scripts/prepare-display /usr/bin/
-    chmod +x /usr/bin/prepare-display
-
-    # Install SDDM configuration script
-    cp /ctx/components/system-scripts/configure-sddm-gaming /usr/bin/
-    chmod +x /usr/bin/configure-sddm-gaming
 
     # Create SDDM override directory and install override
     mkdir -p /usr/lib/systemd/system/sddm.service.d
     cp /ctx/config/systemd/sddm.service.d/gaming-mode.conf /usr/lib/systemd/system/sddm.service.d/
-
-    # Enable targets
-    systemctl enable kodi-mode.target
-    systemctl enable gaming-mode.target
-    systemctl enable display-ready.service
 
     # Set default target to gaming mode
     systemctl set-default gaming-mode.target

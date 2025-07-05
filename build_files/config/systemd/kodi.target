@@ -1,6 +1,6 @@
 [Unit]
 Description=Kodi Mode
-Conflicts=gaming-mode.target
+Conflicts=gamemode.target
 After=multi-user.target display-ready.service
 Wants=kodi-gbm.service
 Wants=network-online.target

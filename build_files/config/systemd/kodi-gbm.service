@@ -1,20 +1,14 @@
 [Unit]
 Description=Kodi standalone (GBM/HDR)
-Documentation=man:kodi(1)
 
-# Part of kodi-mode target
-PartOf=kodi-mode.target
-After=kodi-mode.target
+PartOf=kodi.target
+After=kodi.target
+Conflicts=gamemode.target
 
-# Conflicts with gaming mode
-Conflicts=gaming-mode.target
-
-# Requirements
 After=remote-fs.target systemd-user-sessions.service network-online.target sound.target bluetooth.target polkit.service upower.service display-ready.service
 Wants=network-online.target polkit.service upower.service
 Conflicts=getty@tty1.service
 
-# Ensure clean stop when target stops
 StopWhenUnneeded=yes
 
 [Service]
@@ -25,14 +19,12 @@ TTYPath=/dev/tty1
 
 Environment="HOME=/var/lib/kodi"
 
-# Use systemd's process tracking
 Type=simple
 ExecStart=/usr/bin/kodi-standalone --windowing=gbm
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=10s
 
-# Cleanup is handled by systemd
 KillMode=mixed
 KillSignal=SIGTERM
 FinalKillSignal=SIGKILL
@@ -44,4 +36,4 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=kodi-mode.target
+WantedBy=kodi.target

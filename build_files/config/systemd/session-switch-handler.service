@@ -1,8 +1,6 @@
 [Unit]
 Description=Session Switch Handler
-Documentation=man:systemd.target(5)
 After=multi-user.target
-Before=display-ready.service
 
 [Service]
 Type=simple
@@ -10,21 +8,17 @@ ExecStart=/usr/bin/session-switch-handler
 Restart=always
 RestartSec=5
 
-# Run as root for systemctl access
 User=root
 Group=root
 
-# Resource limits
 LimitNOFILE=4096
 TasksMax=16
 
-# Hardening
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
 ReadWritePaths=/var/run /var/lib/session-state
 
-# Logging
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=session-switch

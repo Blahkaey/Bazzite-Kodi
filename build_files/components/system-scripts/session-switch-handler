@@ -6,6 +6,8 @@ TRIGGER_FILE="/var/run/session-switch-request"
 STATE_FILE="/var/lib/session-state"
 LOG_TAG="session-switch"
 
+VT_INIT_FILE="/var/run/display-vt-initialized"
+
 initialize() {
     mkdir -p /var/run
     touch "$TRIGGER_FILE"
@@ -40,28 +42,39 @@ switch_mode() {
         log_info "${mode} mode already active"
         return 0
     fi
-
-    if $mode == "desktop"; then
-cat > "/etc/sddm.conf.d/zz-steamos-autologin.conf" <<EOF
-[Autologin]
-Session=plasma-steamos-wayland-oneshot.desktop
-EOF
-    else
-cat > "/etc/sddm.conf.d/zz-steamos-autologin.conf" <<EOF
-[Autologin]
-Session=gamescope-session.desktop
-EOF
-    fi
-    
     
     if systemctl isolate "${mode}.target"; then
         update_state "$mode"
+        prepare_display
         log_info "Successfully switched to ${mode} mode"
         return 0
     else
         log_error "Failed to switch to ${mode} mode"
         return 1
     fi
+}
+
+prepare_display() {
+    if [ ! -f "$VT_INIT_FILE" ]; then
+        log_info "Performing initial display setup"
+
+        # Ensure we're on VT1
+        chvt 1 2>/dev/null || true
+        sleep 0.1
+
+        touch "$VT_INIT_FILE"
+    fi
+
+    # Ensure display is awake via DPMS
+    if command -v modetest &>/dev/null; then
+        connector_id=$(modetest -c 2>/dev/null | grep "connected" | grep -v "disconnected" | head -1 | awk '{print $1}')
+        if [ -n "$connector_id" ]; then
+            log_info "Waking display (connector $connector_id)"
+            modetest -w "${connector_id}:DPMS:0" 2>/dev/null || true
+        fi
+    fi
+
+    log_info "Display preparation complete"
 }
 
 main() {
@@ -102,5 +115,4 @@ log_error() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2
 }
 
-# Run main loop
 main "$@"
