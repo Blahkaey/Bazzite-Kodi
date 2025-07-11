@@ -55,6 +55,14 @@ main() {
     run_stage "Pre-staging DeckyLoader components" "/bin/bash /ctx/components/install-deckyloader-prep.sh"
     run_stage "Installing first boot setup" "/bin/bash /ctx/components/install-firstboot.sh"
 
+    rpm -v --import https://repo.nordvpn.com/gpg/nordvpn_public.asc
+
+    # Add NordVPN repository
+    dnf5 config-manager addrepo --id="nordvpn" --set=baseurl="https://repo.nordvpn.com/yum/nordvpn/centos/x86_64" --set=enabled=1 --overwrite
+
+    # Install NordVPN
+    dnf5 -y install nordvpn
+
     log_success "Bazzite-Kodi build completed successfully!"
 }
 
