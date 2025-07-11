@@ -47,7 +47,8 @@ main() {
 
     install_kodi_dependencies
 
-    dnf5 -y install inotify-tools drm-utils drm_info edid-decode java-21-openjdk qbittorrent-nox-5.1.2
+    dnf5 -y install inotify-tools drm-utils drm_info edid-decode java-21-openjdk
+    dnf5 -y --enablerepo=updates-testing install qbittorrent-nox-5.1.2-1.fc42
 
     run_stage "Installing polkit rules" "/bin/bash /ctx/components/install-polkit.sh"
     run_stage "Installing session switching system" "/bin/bash /ctx/components/install-session-switching.sh"
