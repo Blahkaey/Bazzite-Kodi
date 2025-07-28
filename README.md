@@ -44,14 +44,13 @@ request-gamemode
 **This project contains a modified distribution of Kodi™ Media Center. It is NOT endorsed by, affiliated with, or a product of the XBMC Foundation.**
 
 **Original Kodi source:** https://github.com/xbmc/xbmc  
-**Modified source:** https://github.com/Blahkaey/xbmc (Omega branch)
+**Modified source:** https://github.com/Blahkaey/xbmc (Master branch)
 
 
 ## Modifications to Kodi
 This distribution includes the following modifications to standard Kodi:
 - Built with GBM platform and HDR support (custom CMake flags)
 - Added peripheral.joystick and inputstream.adaptive addons
-- Added HDMI content type setting to signal display to disable ALLM
 
 ## Support
 - **For issues with this distribution**: [Issues](https://github.com/Blahkaey/Bazzite-Kodi-SteamOS/issues)
