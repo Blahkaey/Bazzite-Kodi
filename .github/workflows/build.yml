@@ -82,8 +82,8 @@ jobs:
             type=raw,value=${{ env.DEFAULT_TAG }}.{{date 'YYYYMMDD'}},enable={{is_default_branch}}
             type=raw,value={{date 'YYYYMMDD'}},enable={{is_default_branch}}
 
-            # For ALL branches
-            type=raw,value={{branch}}-build-${{ github.run_number }}
+            # For branches (but not PRs)
+            type=raw,value={{branch}}-build-${{ github.run_number }},enable=${{ github.event_name != 'pull_request' }}
 
             # For PRs
             type=sha,enable=${{ github.event_name == 'pull_request' }}
