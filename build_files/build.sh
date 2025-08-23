@@ -50,6 +50,9 @@ main() {
     dnf5 -y install inotify-tools drm-utils drm_info edid-decode java-21-openjdk
     dnf5 -y --enablerepo=updates-testing install qbittorrent-nox-5.1.2-1.fc42
 
+    dnf5 -y scons libXcursor-devel libXinerama-devel libXi-devel libXrandr-devel mesa-libGL-devel alsa-lib-devel pulseaudio-libs-devel libevdev-devel
+
+
     run_stage "Installing polkit rules" "/bin/bash /ctx/components/install-polkit.sh"
     run_stage "Installing session switching system" "/bin/bash /ctx/components/install-session-switching.sh"
     run_stage "Setting up Kodi service" "/bin/bash /ctx/components/install-kodi-service.sh"
