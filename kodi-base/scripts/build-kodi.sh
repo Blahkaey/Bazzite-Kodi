@@ -23,8 +23,8 @@ echo "[INFO] Configuring build..."
 cmake "${SOURCE_DIR}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCORE_PLATFORM_NAME=gbm \
-    -DAPP_RENDER_SYSTEM=gles \
+    -DCORE_PLATFORM_NAME=wayland \
+    -DAPP_RENDER_SYSTEM=gl \
     -DENABLE_VAAPI=ON \
     -DENABLE_VDPAU=OFF \
     -DENABLE_INTERNAL_FMT=ON \
